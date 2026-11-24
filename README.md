@@ -6,11 +6,11 @@ Every paid tool call settles **`0.01 USDC` – `0.02 USDC`** on **Base Mainnet (
 
 ## Live Public Endpoints
 
-- **Gateway Root**: `https://scenes-spencer-dresses-font.trycloudflare.com`
-- **`x402` Discovery Manifest (`200 OK`)**: `https://scenes-spencer-dresses-font.trycloudflare.com/.well-known/x402.json`
-- **Machine-Readable Catalog (`200 OK`)**: `https://scenes-spencer-dresses-font.trycloudflare.com/api/catalog`
-- **OpenAPI `3.1.0` Spec (`200 OK`)**: `https://scenes-spencer-dresses-font.trycloudflare.com/openapi.json`
-- **MCP Streamable HTTP**: `https://scenes-spencer-dresses-font.trycloudflare.com/mcp` (`initialize` & `tools/list` free; `tools/call` gated by `x402`)
+- **Gateway Root**: `https://nick-ebony-forth-sic.trycloudflare.com`
+- **`x402` Discovery Manifest (`200 OK`)**: `https://nick-ebony-forth-sic.trycloudflare.com/.well-known/x402.json`
+- **Machine-Readable Catalog (`200 OK`)**: `https://nick-ebony-forth-sic.trycloudflare.com/api/catalog`
+- **OpenAPI `3.1.0` Spec (`200 OK`)**: `https://nick-ebony-forth-sic.trycloudflare.com/openapi.json`
+- **MCP Streamable HTTP**: `https://nick-ebony-forth-sic.trycloudflare.com/mcp` (`initialize` & `tools/list` free; `tools/call` gated by `x402`)
 
 ## Paid Endpoints & MCP Tools (Base Mainnet USDC)
 
@@ -44,7 +44,7 @@ const account = privateKeyToAccount(process.env.EVM_PRIVATE_KEY as `0x${string}`
 const fetchWithPay = wrapFetchWithPayment(fetch, account);
 
 const res = await fetchWithPay(
-  'https://scenes-spencer-dresses-font.trycloudflare.com/api/v1/validate-address',
+  'https://nick-ebony-forth-sic.trycloudflare.com/api/v1/validate-address',
   {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
