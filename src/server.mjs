@@ -531,20 +531,105 @@ export function createGatewayServer({
         return;
       }
 
-      // 2. Paid REST Routes (`/api/v1/*`)
+      // 1b. Free Deterministic Sample Routes (`/api/sample?endpoint=<id>` or `/api/v1/<id>/sample`)
+      if (method === 'GET' && (pathname === '/api/sample' || /^\/api\/v1\/[a-z0-9-]+\/sample$/.test(pathname))) {
+        const sampleId =
+          pathname === '/api/sample'
+            ? (parsedUrl.searchParams.get('endpoint') || 'validate-address').trim()
+            : pathname.split('/')[3];
+        const targetEp = PAID_ENDPOINTS.find((e) => e.id === sampleId);
+        if (!targetEp) {
+          sendJson(res, 404, {
+            status: 'not_found',
+            error: `Unknown sample endpoint "${sampleId}".`,
+            availableSamples: PAID_ENDPOINTS.map((e) => `${baseUrl}${e.restPath}/sample`),
+          });
+          return;
+        }
+        const sampleOutput = await targetEp.execute(targetEp.sampleRequest, {
+          fetchFn: engine.fetchFn,
+        });
+        sendJson(res, 200, {
+          status: 'ok',
+          sampleOnly: true,
+          note: 'Fixed synthetic sample execution (custom inputs require x402 payment on the live endpoint).',
+          endpoint: `${baseUrl}${targetEp.restPath}`,
+          priceUsdc: targetEp.priceUsd,
+          payTo: engine.payTo,
+          sampleInput: targetEp.sampleRequest,
+          sampleOutput,
+        });
+        return;
+      }
+
+      // 2. Paid REST Routes (`/api/v1/*`) — supports POST JSON body and GET query parameters
       const paidEndpoint = ENDPOINTS_BY_PATH.get(pathname);
       if (paidEndpoint) {
-        const resourceUrl = `${baseUrl}${paidEndpoint.restPath}`;
+        const resourceUrl =
+          method === 'GET' && parsedUrl.search
+            ? `${baseUrl}${paidEndpoint.restPath}${parsedUrl.search}`
+            : `${baseUrl}${paidEndpoint.restPath}`;
         const hasPayment = Boolean(extractPaymentCredential(req.headers));
 
-        // Allow unpaid GET/HEAD/POST probes to immediately discover the 402 challenge (`x402scan` / `x402lint`)
-        if (method !== 'POST') {
+        if (method === 'HEAD') {
           if (!hasPayment) {
             const unauth = await engine.processPaidCall({
               endpoint: paidEndpoint,
               args: {},
               reqHeaders: {},
-              resourceUrl,
+              resourceUrl: `${baseUrl}${paidEndpoint.restPath}`,
+            });
+            setCommonHeaders(res);
+            res.statusCode = unauth.challenge.statusCode;
+            for (const [k, v] of Object.entries(unauth.challenge.headers)) {
+              res.setHeader(k, v);
+            }
+            res.end();
+            return;
+          }
+          res.setHeader('Allow', 'GET, POST, HEAD, OPTIONS');
+          sendJson(res, 405, {
+            error: 'Method Not Allowed for paid execution. Use GET with query params or POST with JSON body.',
+          });
+          return;
+        }
+
+        if (method !== 'POST' && method !== 'GET') {
+          res.setHeader('Allow', 'GET, POST, HEAD, OPTIONS');
+          sendJson(res, 405, {
+            error: 'Method Not Allowed. Use GET with query params or POST with JSON body.',
+            settled: false,
+          });
+          return;
+        }
+
+        let parsedBody = {};
+        if (method === 'GET') {
+          const props = paidEndpoint.inputSchema?.properties || {};
+          for (const [k, rawVal] of parsedUrl.searchParams.entries()) {
+            const propType = props[k]?.type;
+            if (propType === 'number' || propType === 'integer') {
+              const num = Number(rawVal);
+              parsedBody[k] = Number.isNaN(num) ? rawVal : num;
+            } else if (propType === 'boolean') {
+              parsedBody[k] = rawVal === 'true' || rawVal === '1';
+            } else if ((propType === 'array' || propType === 'object' || k === 'typedData') && (rawVal.trim().startsWith('{') || rawVal.trim().startsWith('['))) {
+              try {
+                parsedBody[k] = JSON.parse(rawVal);
+              } catch {
+                parsedBody[k] = rawVal;
+              }
+            } else {
+              parsedBody[k] = rawVal;
+            }
+          }
+          // Bare unpaid GET probe (`GET /api/v1/validate-address` with no query params) -> return 402 quote immediately
+          if (!hasPayment && Object.keys(parsedBody).length === 0) {
+            const unauth = await engine.processPaidCall({
+              endpoint: paidEndpoint,
+              args: {},
+              reqHeaders: {},
+              resourceUrl: `${baseUrl}${paidEndpoint.restPath}`,
             });
             sendJson(
               res,
@@ -554,26 +639,22 @@ export function createGatewayServer({
             );
             return;
           }
-          sendJson(res, 405, {
-            error: 'Method Not Allowed. Send POST with JSON body for paid execution.',
-          });
-          return;
-        }
-
-        const rawBody = await readRawBody(req);
-        let parsedBody = {};
-        if (rawBody.trim() !== '') {
-          try {
-            parsedBody = JSON.parse(rawBody);
-          } catch {
-            if (!hasPayment) {
-              parsedBody = {};
-            } else {
-              sendJson(res, 400, {
-                status: 'error',
-                error: 'Request body is not valid JSON. Payment was NOT settled.',
-              });
-              return;
+        } else {
+          const rawBody = await readRawBody(req);
+          if (rawBody.trim() !== '') {
+            try {
+              parsedBody = JSON.parse(rawBody);
+            } catch {
+              if (!hasPayment) {
+                parsedBody = {};
+              } else {
+                sendJson(res, 400, {
+                  status: 'error',
+                  error: 'Request body is not valid JSON. Payment was NOT settled.',
+                  settled: false,
+                });
+                return;
+              }
             }
           }
         }

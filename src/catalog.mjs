@@ -158,6 +158,22 @@ export const PAID_ENDPOINTS = [
       chain: 'evm',
       expectedNetwork: 'mainnet',
     },
+    sampleResponse: {
+      status: 'ok',
+      tool: 'validate_multichain_address',
+      summary: {
+        valid: true,
+        safeToTransact: true,
+        riskLevel: 'LOW',
+        chain: 'evm',
+        network: 'mainnet',
+        canonicalAddress: '0xfEbDbB880C7f323c145d61683874a45540208a68',
+      },
+      analysis: {
+        valid: true,
+        chain: 'evm',
+      },
+    },
     validateArgs(args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
         throw new InputValidationError('Request body must be a JSON object.');
@@ -264,6 +280,22 @@ export const PAID_ENDPOINTS = [
       value: '0',
       data: '0x095ea7b30000000000000000000000001111111254eeb25477b68fb85ed929f73a960582ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
       chainId: 8453,
+    },
+    sampleResponse: {
+      status: 'ok',
+      tool: 'decode_and_audit_evm_calldata',
+      summary: {
+        safeToExecute: false,
+        recommendation: 'BLOCK',
+        riskLevel: 'CRITICAL',
+        riskScore: 90,
+        standard: 'ERC-20',
+        functionName: 'approve(address,uint256)',
+        findingCount: 1,
+      },
+      audit: {
+        findings: [],
+      },
     },
     validateArgs(args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -404,6 +436,22 @@ export const PAID_ENDPOINTS = [
       },
       expectedChainId: 8453,
     },
+    sampleResponse: {
+      status: 'ok',
+      tool: 'audit_eip712_signature_payload',
+      summary: {
+        safeToSign: true,
+        recommendation: 'ALLOW',
+        riskLevel: 'LOW',
+        riskScore: 0,
+        schemaCategory: 'EIP-3009',
+        primaryType: 'TransferWithAuthorization',
+        findingCount: 0,
+      },
+      audit: {
+        findings: [],
+      },
+    },
     validateArgs(args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
         throw new InputValidationError('Request body must be a JSON object.');
@@ -507,6 +555,22 @@ export const PAID_ENDPOINTS = [
     sampleRequest: {
       filename: 'alipay_export.csv',
       content: '订单号,商户名称,金额\n202611240001,阿里云计算,¥1,250.00\n',
+    },
+    sampleResponse: {
+      status: 'ok',
+      tool: 'repair_cjk_csv_mojibake',
+      summary: {
+        filename: 'alipay_export.csv',
+        detectedEncoding: 'UTF-8',
+        mojibakeRepaired: false,
+        confidence: 1,
+        delimiter: ',',
+        columnCount: 3,
+        rowCount: 1,
+      },
+      headers: ['订单号', '商户名称', '金额'],
+      rows: [['202611240001', '阿里云计算', '¥1,250.00']],
+      utf8BomCsv: '\uFEFF订单号,商户名称,金额\n',
     },
     validateArgs(args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -624,6 +688,20 @@ export const PAID_ENDPOINTS = [
     sampleRequest: {
       filename: 'quarterly.html',
       content: '<table><tr><th>Item</th><th>Amount</th></tr><tr><td>Cloud Compute</td><td>120.50</td></tr></table>',
+    },
+    sampleResponse: {
+      status: 'ok',
+      tool: 'extract_and_clean_pdf_tables_to_xlsx',
+      summary: {
+        filename: 'quarterly.html',
+        pageCount: 1,
+        tableCount: 1,
+        totalRows: 1,
+      },
+      tables: [],
+      markdown: '| Item | Amount |',
+      utf8BomCsv: '\uFEFFItem,Amount\n',
+      xlsxBase64: 'UEsDBBQAAAAIA',
     },
     validateArgs(args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
@@ -759,6 +837,20 @@ export const PAID_ENDPOINTS = [
       ],
       baseCurrency: 'USD',
     },
+    sampleResponse: {
+      status: 'ok',
+      tool: 'reconcile_statements_and_invoices',
+      summary: {
+        totalStatements: 1,
+        totalInvoices: 1,
+        matchedCount: 1,
+      },
+      transactions: [],
+      invoices: [],
+      anomalies: [],
+      utf8BomCsv: '\uFEFF',
+      xlsxBase64: 'UEsDBBQAAAAIA',
+    },
     validateArgs(args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
         throw new InputValidationError('Request body must be a JSON object.');
@@ -860,11 +952,31 @@ export const PAID_ENDPOINTS = [
       tokenAddress: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed',
       chain: 'base',
     },
+    sampleResponse: {
+      status: 'ok',
+      tool: 'scan_token_rug_risk',
+      summary: {
+        chain: 'base',
+        tokenAddress: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed',
+        symbol: 'DEGEN',
+        safeToTrade: true,
+        recommendation: 'ALLOW',
+        riskLevel: 'LOW',
+        riskScore: 0,
+        findingCount: 0,
+        latencyMs: 120,
+      },
+      scan: {
+        chain: 'base',
+        findings: [],
+      },
+    },
     validateArgs(args) {
       if (!args || typeof args !== 'object' || Array.isArray(args)) {
         throw new InputValidationError('Request body must be a JSON object.');
       }
-      const addr = typeof args.tokenAddress === 'string' ? args.tokenAddress.trim() : '';
+      const rawAddr = args.tokenAddress ?? args.address;
+      const addr = typeof rawAddr === 'string' ? rawAddr.trim() : '';
       if (!addr) {
         throw new InputValidationError('Field `tokenAddress` is required (0x Base ERC-20 or Base58 Solana mint).');
       }
@@ -888,7 +1000,7 @@ export const PAID_ENDPOINTS = [
     },
     async execute(args, ctx = {}) {
       const scan = await scanOnChainTokenRugRisk({
-        tokenAddress: args.tokenAddress,
+        tokenAddress: args.tokenAddress ?? args.address,
         chain: args.chain || 'auto',
         ...(ctx.fetchFn ? { fetchFn: ctx.fetchFn } : {}),
       });

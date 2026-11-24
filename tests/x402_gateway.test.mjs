@@ -272,8 +272,24 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
       assert.equal(v2.x402Version, 2);
       assert.equal(v2.accepts[0].network, 'eip155:8453');
       assert.equal(v2.accepts[0].amount, '10000');
+      assert.equal(v2.accepts[0].maxAmountRequired, undefined);
       assert.equal(v2.accepts[0].payTo, PAY_TO);
+      assert.equal(v2.extensions.bazaar.info.output.example.status, 'ok');
+      assert.equal(body.extensions.bazaar.info.output.example.tool, 'validate_multichain_address');
     }
+
+    const headRes = await fetch(`${localUrl}/api/v1/validate-address`, { method: 'HEAD' });
+    assert.equal(headRes.status, 402);
+    assert.ok(headRes.headers.get('payment-required'));
+
+    const wkNoExt = await fetch(`${localUrl}/.well-known/x402`);
+    assert.equal(wkNoExt.status, 200);
+
+    const sampleRes = await fetch(`${localUrl}/api/v1/validate-address/sample`);
+    assert.equal(sampleRes.status, 200);
+    const sampleJson = await sampleRes.json();
+    assert.equal(sampleJson.sampleOnly, true);
+    assert.equal(sampleJson.sampleOutput.summary.canonicalAddress, PAY_TO);
   });
 
   await t.test('3. x402lint guard: bad input WITH payment header returns HTTP 400 BEFORE settling ($0 charged)', async () => {
@@ -542,5 +558,23 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     assert.ok(codes.includes('FREEZE_AUTHORITY_ACTIVE'));
     assert.ok(codes.includes('TOKEN2022_PERMANENT_DELEGATE'));
     assert.ok(codes.includes('TOKEN2022_EXTREME_TRANSFER_TAX'));
+
+    // Paid GET with query params + v2 PAYMENT-SIGNATURE header
+    const getPayV2 = makeSamplePaymentHeader({
+      version: 2,
+      nonce: `0x${'44'.repeat(32)}`,
+    });
+    const getPaidRes = await fetch(
+      `${localUrl}/api/v1/validate-address?address=${PAY_TO.toLowerCase()}&chain=evm`,
+      {
+        method: 'GET',
+        headers: { 'PAYMENT-SIGNATURE': getPayV2 },
+      },
+    );
+    assert.equal(getPaidRes.status, 200);
+    const getPaidJson = await getPaidRes.json();
+    assert.equal(getPaidJson.summary.valid, true);
+    assert.equal(getPaidJson.summary.canonicalAddress, PAY_TO);
+    assert.equal(getPaidJson.payment.network, 'eip155:8453');
   });
 });

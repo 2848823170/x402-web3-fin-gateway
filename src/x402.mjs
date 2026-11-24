@@ -178,7 +178,6 @@ export function buildPaymentRequirementsV2(endpoint, payTo = PAY_TO) {
     scheme: 'exact',
     network: BASE_CAIP2_NETWORK,
     amount: endpoint.amountAtomic,
-    maxAmountRequired: endpoint.amountAtomic,
     asset: BASE_USDC_ASSET,
     payTo,
     maxTimeoutSeconds: 300,
@@ -186,12 +185,56 @@ export function buildPaymentRequirementsV2(endpoint, payTo = PAY_TO) {
   };
 }
 
+export function buildBazaarExtensions(endpoint) {
+  return {
+    bazaar: {
+      info: {
+        input: {
+          type: 'http',
+          method: 'POST',
+          bodyType: 'json',
+          body: endpoint.sampleRequest || {},
+        },
+        output: {
+          type: 'json',
+          example: endpoint.sampleResponse || {},
+        },
+      },
+      schema: {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: {
+          input: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', const: 'http' },
+              method: { type: 'string', enum: ['POST', 'GET'] },
+              bodyType: { type: 'string', enum: ['json'] },
+              body: endpoint.inputSchema,
+            },
+            required: ['type', 'method', 'body'],
+          },
+          output: {
+            type: 'object',
+            properties: {
+              type: { type: 'string', const: 'json' },
+              example: endpoint.outputSchemaShape,
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
 export function build402Response(endpoint, resourceUrl, errorMessage = 'X-PAYMENT header is required', payTo = PAY_TO) {
   const v1Requirement = buildPaymentRequirementsV1(endpoint, resourceUrl, payTo);
+  const extensions = buildBazaarExtensions(endpoint);
   const v1Body = {
     x402Version: 1,
     error: errorMessage,
     accepts: [v1Requirement],
+    extensions,
   };
 
   const v2HeaderPayload = {
@@ -203,44 +246,7 @@ export function build402Response(endpoint, resourceUrl, errorMessage = 'X-PAYMEN
       mimeType: 'application/json',
     },
     accepts: [buildPaymentRequirementsV2(endpoint, payTo)],
-    extensions: {
-      bazaar: {
-        info: {
-          input: {
-            type: 'http',
-            method: 'POST',
-            bodyType: 'json',
-            body: endpoint.sampleRequest || {},
-          },
-          output: {
-            type: 'json',
-          },
-        },
-        schema: {
-          $schema: 'https://json-schema.org/draft/2020-12/schema',
-          type: 'object',
-          properties: {
-            input: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', const: 'http' },
-                method: { type: 'string', enum: ['POST'] },
-                bodyType: { type: 'string', enum: ['json'] },
-                body: endpoint.inputSchema,
-              },
-              required: ['type', 'method', 'body'],
-            },
-            output: {
-              type: 'object',
-              properties: {
-                type: { type: 'string', const: 'json' },
-                example: endpoint.outputSchemaShape,
-              },
-            },
-          },
-        },
-      },
-    },
+    extensions,
   };
 
   const headers = {
@@ -439,9 +445,23 @@ export class X402GatewayEngine {
           ? buildPaymentRequirementsV2(endpoint, this.payTo)
           : buildPaymentRequirementsV1(endpoint, resourceUrl, this.payTo);
 
+      const normalizedPaymentPayload =
+        check.version === 2
+          ? {
+              ...check.paymentPayload,
+              x402Version: 2,
+              resource: check.paymentPayload.resource || {
+                url: resourceUrl,
+                description: endpoint.description,
+                mimeType: 'application/json',
+              },
+              accepted: check.paymentPayload.accepted || paymentRequirements,
+            }
+          : check.paymentPayload;
+
       const reqBody = {
         x402Version: check.version,
-        paymentPayload: check.paymentPayload,
+        paymentPayload: normalizedPaymentPayload,
         paymentRequirements,
       };
 
