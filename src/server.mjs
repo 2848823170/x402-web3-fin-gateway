@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Direct 0%-Fee Native x402 Base Mainnet USDC API & MCP Gateway (`server.mjs`).
  *
  * Designed for user-space deployment (`127.0.0.1:9102` + outbound Cloudflare HTTPS tunnel):
@@ -327,7 +327,7 @@ function buildOpenApiSpec(baseUrl, payTo) {
       description: `Direct 0%-fee native x402 Base Mainnet USDC REST & MCP API Gateway paying directly to ${payTo}.`,
       contact: {
         name: 'x402 Web3 & Financial Security Gateway',
-        email: '2848823170@qq.com',
+        email: 'chenshulang0223@gmail.com',
         url: baseUrl,
       },
       'x-guidance': `All POST /api/v1/* endpoints are keyless x402 paid routes on Base Mainnet USDC (chainId 8453, asset ${BASE_USDC_ASSET}) settling directly to ${payTo}. Send an unauthenticated POST first to receive the HTTP 402 challenge (both v1 JSON body and v2 PAYMENT-REQUIRED header), sign the EIP-3009 TransferWithAuthorization via x402-fetch / @x402/fetch, and retry with X-PAYMENT or PAYMENT-SIGNATURE. Invalid request bodies return HTTP 400 before settlement ($0 charged).`,
@@ -374,7 +374,7 @@ function buildLandingHtml(baseUrl, payTo) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-  <title>x402 Web3 & Financial Security Gateway — Base Mainnet USDC</title>
+  <title>x402 Web3 & Financial Security Gateway 鈥?Base Mainnet USDC</title>
   <style>
     body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #0b1120; color: #e2e8f0; margin: 0; padding: 2.5rem 1.25rem; line-height: 1.6; }
     .wrap { max-width: 960px; margin: 0 auto; }
@@ -578,7 +578,7 @@ export function createGatewayServer({
         return;
       }
 
-      // 2. Paid REST Routes (`/api/v1/*`) — supports POST JSON body and GET query parameters
+      // 2. Paid REST Routes (`/api/v1/*`) 鈥?supports POST JSON body and GET query parameters
       const paidEndpoint = ENDPOINTS_BY_PATH.get(pathname);
       if (paidEndpoint) {
         const resourceUrl =
