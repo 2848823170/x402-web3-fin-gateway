@@ -1,16 +1,22 @@
 # x402 Web3 Security & Financial Audit Gateway (`0%` Middleman Fee • Base Mainnet USDC)
 
+[![Indexed on x402scan](https://img.shields.io/badge/x402scan-Indexed_v2_(10_Resources)-06b6d4)](https://www.x402scan.com/server/51881708-6ade-4170-a4d2-4cab8db3652a)
+[![CI](https://github.com/2848823170/x402-web3-fin-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/2848823170/x402-web3-fin-gateway/actions)
+
 Direct, zero-custody **HTTP 402 Payment Required (`x402` v1 & v2)** REST API + **Model Context Protocol (`MCP` `2025-06-18`)** Gateway built with **zero external npm dependencies** (pure Node.js `>= 20`).
 
 Every paid tool call settles **`0.01 USDC` – `0.02 USDC`** on **Base Mainnet (`chainId: 8453`, USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)** directly to **`0xfEbDbB880C7f323c145d61683874a45540208a68`** with **`0%` middleman fee**.
 
 ## Live Public Endpoints
 
-- **Gateway Root**: `https://nick-ebony-forth-sic.trycloudflare.com`
-- **`x402` Discovery Manifest (`200 OK`)**: `https://nick-ebony-forth-sic.trycloudflare.com/.well-known/x402.json`
-- **Machine-Readable Catalog (`200 OK`)**: `https://nick-ebony-forth-sic.trycloudflare.com/api/catalog`
-- **OpenAPI `3.1.0` Spec (`200 OK`)**: `https://nick-ebony-forth-sic.trycloudflare.com/openapi.json`
-- **MCP Streamable HTTP**: `https://nick-ebony-forth-sic.trycloudflare.com/mcp` (`initialize` & `tools/list` free; `tools/call` gated by `x402`)
+- **Primary Immortal Gateway (Vercel)**: **`https://x402-web3-fin-gateway.vercel.app`**
+- **Verified `x402scan.com` Server (`v2` · `10` Resources · `Try with AgentCash`)**: **[https://www.x402scan.com/server/51881708-6ade-4170-a4d2-4cab8db3652a](https://www.x402scan.com/server/51881708-6ade-4170-a4d2-4cab8db3652a)**
+- **Interactive Browser DApp (`Web3 Rug & Calldata Shield`)**: **[https://2848823170.github.io/web3-rug-shield/](https://2848823170.github.io/web3-rug-shield/)**
+- **`x402` Discovery Manifest (`200 OK`)**: `https://x402-web3-fin-gateway.vercel.app/.well-known/x402.json`
+- **Machine-Readable Catalog (`200 OK`)**: `https://x402-web3-fin-gateway.vercel.app/api/catalog`
+- **OpenAPI `3.1.0` Spec (`200 OK`)**: `https://x402-web3-fin-gateway.vercel.app/openapi.json`
+- **MCP Streamable HTTP**: `https://x402-web3-fin-gateway.vercel.app/mcp` (`initialize` & `tools/list` free; `tools/call` gated by `x402`)
+- **Secondary Dedicated Cloud Node (Fallback)**: `https://nick-ebony-forth-sic.trycloudflare.com`
 
 ## Paid Endpoints & MCP Tools (Base Mainnet USDC)
 
@@ -45,7 +51,7 @@ const account = privateKeyToAccount(process.env.EVM_PRIVATE_KEY as `0x${string}`
 const fetchWithPay = wrapFetchWithPayment(fetch, account);
 
 const res = await fetchWithPay(
-  'https://nick-ebony-forth-sic.trycloudflare.com/api/v1/validate-address',
+  'https://x402-web3-fin-gateway.vercel.app/api/v1/validate-address',
   {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
