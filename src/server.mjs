@@ -488,6 +488,22 @@ export function createGatewayServer({
         return;
       }
 
+      if (method === 'GET' && pathname === '/.well-known/402index-verify.txt') {
+        setCommonHeaders(res);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('2f164d85fb17966b109baa52a3dbb431e786fe557a74afb13082e572f092fe23');
+        return;
+      }
+
+      if (method === 'GET' && pathname === '/.well-known/botsrated-verify.txt') {
+        setCommonHeaders(res);
+        res.statusCode = 200;
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.end('1119e5789a152623346fd91588d60e2d');
+        return;
+      }
+
       if (method === 'GET' && pathname === '/llms.txt') {
         setCommonHeaders(res);
         res.statusCode = 200;
