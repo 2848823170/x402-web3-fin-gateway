@@ -1,0 +1,27 @@
+{
+  "name": "x402-web3-fin-gateway",
+  "version": "1.0.0",
+  "description": "Direct 0%-Fee Native x402 (HTTP 402 Payment Required) Base Mainnet USDC REST & MCP API Gateway for Web3 Transaction Security & Financial Document Auditing.",
+  "type": "module",
+  "main": "src/server.mjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "test": "node --test tests/x402_gateway.test.mjs"
+  },
+  "keywords": [
+    "x402",
+    "mcp",
+    "model-context-protocol",
+    "base",
+    "usdc",
+    "eip-3009",
+    "eip-712",
+    "web3-security",
+    "calldata-decoder",
+    "financial-reconciliation"
+  ],
+  "license": "MIT"
+}
