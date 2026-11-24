@@ -677,7 +677,7 @@ export class X402GatewayEngine {
     // Validate request arguments BEFORE verifying/settling payment (`x402lint` no-charge-on-bad-input rule!)
     endpoint.validateArgs(args);
 
-    const executeCallback = () => endpoint.execute(args);
+    const executeCallback = () => endpoint.execute(args, { fetchFn: this.fetchFn });
 
     const outcome =
       credential.kind === 'tx-hash'

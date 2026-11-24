@@ -20,6 +20,7 @@ import {
 import { auditEip712SignaturePayload } from './web3/eip712-audit.mjs';
 import { decodeAndAuditEvmCalldata } from './web3/evm-calldata.mjs';
 import { validateMultichainAddress } from './web3/multichain-address.mjs';
+import { scanOnChainTokenRugRisk } from './web3/token-rug-scanner.mjs';
 
 export class InputValidationError extends Error {
   constructor(message) {
@@ -792,6 +793,120 @@ export const PAID_ENDPOINTS = [
         anomalies: result.anomalies,
         utf8BomCsv: result.utf8BomCsv,
         ...(includeXlsx ? { xlsxBase64: result.xlsxBase64, xlsxByteLength: result.xlsxBytes.length } : {}),
+      };
+    },
+  },
+  {
+    id: 'scan-token-risk',
+    restPath: '/api/v1/scan-token-risk',
+    mcpName: 'scan_token_rug_risk',
+    title: 'Live On-Chain Base & Solana Token Honeypot, Rug-Pull & Liquidity Scanner',
+    category: 'web3-security',
+    priceUsd: '0.01',
+    amountAtomic: '10000',
+    description:
+      'Real-time on-chain token security oracle for autonomous trading agents (`ElizaOS`, `Coinbase AgentKit`, `Virtuals`, `GOAT`). Queries Base Mainnet (`8453`) and Solana Mainnet RPCs in <400ms to detect EIP-1967 upgradeable proxies, unrenounced `owner()`, `SELFDESTRUCT`/`DELEGATECALL`/blacklist/fee-setter bytecode selectors, Uniswap V2/V3 & Aerodrome reserve depth + LP burn %, live `eth_call` `transfer()` honeypot simulation, Solana `mintAuthority`/`freezeAuthority`, Token-2022 `permanentDelegate`/`transferFeeConfig`/`transferHook` traps, and Top-1/Top-5/Top-10 holder whale concentration.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tokenAddress: {
+          type: 'string',
+          description:
+            'Base Mainnet ERC-20 contract address (0x + 40 hex) or Solana SPL / Token-2022 mint address (32–44 Base58 chars).',
+        },
+        chain: {
+          type: 'string',
+          enum: ['auto', 'base', 'solana'],
+          description: 'Target chain: auto (default), base, or solana.',
+          default: 'auto',
+        },
+      },
+      required: ['tokenAddress'],
+    },
+    bodyFields: {
+      tokenAddress: {
+        type: 'string',
+        required: true,
+        description: 'Base ERC-20 contract (0x...) or Solana SPL/Token-2022 mint address (Base58)',
+      },
+      chain: {
+        type: 'string',
+        required: false,
+        description: 'Optional chain selector: auto, base, or solana',
+      },
+    },
+    outputSchemaShape: {
+      type: 'object',
+      properties: {
+        status: { type: 'string' },
+        tool: { type: 'string' },
+        summary: {
+          type: 'object',
+          properties: {
+            chain: { type: 'string' },
+            tokenAddress: { type: 'string' },
+            safeToTrade: { type: 'boolean' },
+            recommendation: { type: 'string' },
+            riskLevel: { type: 'string' },
+            riskScore: { type: 'number' },
+            findingCount: { type: 'number' },
+            latencyMs: { type: 'number' },
+          },
+        },
+        scan: { type: 'object' },
+      },
+    },
+    sampleRequest: {
+      tokenAddress: '0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed',
+      chain: 'base',
+    },
+    validateArgs(args) {
+      if (!args || typeof args !== 'object' || Array.isArray(args)) {
+        throw new InputValidationError('Request body must be a JSON object.');
+      }
+      const addr = typeof args.tokenAddress === 'string' ? args.tokenAddress.trim() : '';
+      if (!addr) {
+        throw new InputValidationError('Field `tokenAddress` is required (0x Base ERC-20 or Base58 Solana mint).');
+      }
+      const ch = String(args.chain || 'auto').toLowerCase();
+      if (!['auto', 'base', 'evm', 'solana', 'sol'].includes(ch)) {
+        throw new InputValidationError('Field `chain` must be one of: auto, base, solana.');
+      }
+      const isEvm = /^0x[0-9a-fA-F]{40}$/.test(addr);
+      const isSol = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr);
+      if (!isEvm && !isSol) {
+        throw new InputValidationError(
+          'Field `tokenAddress` must be a valid 0x Base ERC-20 address or 32–44 character Base58 Solana mint.',
+        );
+      }
+      if ((ch === 'base' || ch === 'evm') && !isEvm) {
+        throw new InputValidationError('Field `tokenAddress` must be a 0x + 40 hex address when `chain` is "base".');
+      }
+      if ((ch === 'solana' || ch === 'sol') && !isSol) {
+        throw new InputValidationError('Field `tokenAddress` must be a Base58 mint when `chain` is "solana".');
+      }
+    },
+    async execute(args, ctx = {}) {
+      const scan = await scanOnChainTokenRugRisk({
+        tokenAddress: args.tokenAddress,
+        chain: args.chain || 'auto',
+        ...(ctx.fetchFn ? { fetchFn: ctx.fetchFn } : {}),
+      });
+      return {
+        status: 'ok',
+        tool: 'scan_token_rug_risk',
+        summary: {
+          chain: scan.chain,
+          tokenAddress: scan.tokenAddress,
+          symbol: scan.token?.symbol || null,
+          safeToTrade: scan.safeToTrade,
+          recommendation: scan.recommendation,
+          riskLevel: scan.riskLevel,
+          riskScore: scan.riskScore,
+          findingCount: scan.findings.length,
+          latencyMs: scan.latencyMs,
+        },
+        scan,
       };
     },
   },

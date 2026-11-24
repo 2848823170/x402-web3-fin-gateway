@@ -17,6 +17,7 @@ Every paid tool call settles **`0.01 USDC` – `0.02 USDC`** on **Base Mainnet (
 | REST Endpoint (`POST`) | MCP Tool Name | Price (USDC) | Atomic (`6` dec) | Capability |
 | --- | --- | --- | --- | --- |
 | `/api/v1/validate-address` | `validate_multichain_address` | **`$0.01`** | `10000` | Cryptographic wallet/contract validation across 8 chains (EVM EIP-55, Tron, Bitcoin Bech32/Bech32m/Base58Check, Solana Ed25519 curve vs PDA, TON CRC16, XRPL X-address, Cosmos, Stacks) |
+| `/api/v1/scan-token-risk` | `scan_token_rug_risk` | **`$0.01`** | `10000` | Live `<400ms` on-chain Base Mainnet ERC-20 & Solana SPL / Token-2022 honeypot, mint/freeze authority, EIP-1967 proxy, Uniswap/Aerodrome liquidity & LP burn %, and whale concentration oracle |
 | `/api/v1/audit-calldata` | `decode_and_audit_evm_calldata` | **`$0.01`** | `10000` | Raw EVM calldata decoder & risk auditor (ERC-20/721/1155, Permit2, Uniswap V2/V3/UniversalRouter, 1inch, recursive Multicall, Gnosis Safe `DELEGATECALL`) |
 | `/api/v1/audit-eip712` | `audit_eip712_signature_payload` | **`$0.01`** | `10000` | Off-chain `eth_signTypedData_v4` auditor (`Permit`, `Permit2`, Seaport zero-consideration drains, Circle USDC EIP-3009 `TransferWithAuthorization` / `x402`, `SafeTx`) |
 | `/api/v1/repair-cjk-csv` | `repair_cjk_csv_mojibake` | **`$0.01`** | `10000` | Repairs GB18030/GBK/Big5/Shift-JIS/EUC-KR/UTF-16/double-UTF8 CSV mojibake and neutralizes OWASP CSV/DDE formula injection |

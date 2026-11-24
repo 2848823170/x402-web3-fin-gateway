@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { createGatewayServer } from '../src/server.mjs';
+import { scanEvmBytecodeCapabilities } from '../src/web3/token-rug-scanner.mjs';
 import {
   BASE_USDC_ASSET,
   ERC20_TRANSFER_TOPIC0,
@@ -144,6 +145,54 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
       }
       return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: null }), { status: 200 });
     }
+    if (url === 'https://api.mainnet-beta.solana.com') {
+      if (body.method === 'getAccountInfo') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            result: {
+              value: {
+                owner: 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
+                data: {
+                  parsed: {
+                    info: {
+                      decimals: 6,
+                      supply: '1000000000000',
+                      mintAuthority: 'RugAuth111111111111111111111111111111111111',
+                      freezeAuthority: 'FreezeAuth111111111111111111111111111111111',
+                      extensions: [
+                        {
+                          extension: 'permanentDelegate',
+                          state: { delegate: 'DrainDelegate11111111111111111111111111111' },
+                        },
+                        {
+                          extension: 'transferFeeConfig',
+                          state: { newerTransferFee: { transferFeeBasisPoints: 2500 } },
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (body.method === 'getTokenLargestAccounts') {
+        return new Response(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            id: 2,
+            result: {
+              value: [{ address: 'WhaleVault111111111111111111111111111111111', amount: '650000000000', uiAmountString: '650000' }],
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+    }
     throw new Error(`Unexpected fetch URL: ${url}`);
   };
 
@@ -174,8 +223,8 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     assert.equal(wk.asset, '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
     assert.equal(wk.chainId, 8453);
     assert.equal(wk.middlemanFeeBps, 0);
-    assert.equal(wk.resources.length, 6);
-    assert.equal(wk.accepts.length, 6);
+    assert.equal(wk.resources.length, 7);
+    assert.equal(wk.accepts.length, 7);
     assert.equal(
       wk.resources[0],
       'https://x402-demo.trycloudflare.com/api/v1/validate-address',
@@ -186,7 +235,7 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     const cat = await catRes.json();
     assert.equal(cat.settlement.payTo, PAY_TO);
     assert.equal(cat.settlement.middlemanFeePercent, 0);
-    assert.equal(cat.endpoints.length, 6);
+    assert.equal(cat.endpoints.length, 7);
 
     const htmlRes = await fetch(`${localUrl}/`, { headers: { Accept: 'text/html' } });
     assert.equal(htmlRes.status, 200);
@@ -406,7 +455,7 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     });
     assert.equal(listRes.status, 200);
     const listJson = await listRes.json();
-    assert.equal(listJson.result.tools.length, 6);
+    assert.equal(listJson.result.tools.length, 7);
 
     // Unpaid tools/call -> HTTP 402
     const unpaidCall = await fetch(`${localUrl}/mcp`, {
@@ -459,5 +508,39 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     assert.equal(health.telemetry.settledPayments, 4);
     assert.equal(health.telemetry.totalSettledAtomicUsdc, '50000');
     assert.equal(health.telemetry.totalSettledUsdc, '0.050000');
+  });
+
+  await t.test('8. Live Token Rug/Honeypot Scanner (/api/v1/scan-token-risk): bytecode PUSH-skip + Token-2022 trap detection', async () => {
+    // PUSH2 0xffff (data, NOT selfdestruct) vs real 0xff opcode
+    const safePush = scanEvmBytecodeCapabilities('0x61ffff00');
+    assert.equal(safePush.hasSelfdestruct, false);
+    const realSelfdestruct = scanEvmBytecodeCapabilities('0x6340c10f19ff');
+    assert.equal(realSelfdestruct.hasMintSelector, true);
+    assert.equal(realSelfdestruct.hasSelfdestruct, true);
+
+    const scanPay = makeSamplePaymentHeader({
+      version: 1,
+      nonce: `0x${'33'.repeat(32)}`,
+    });
+    const scanRes = await fetch(`${localUrl}/api/v1/scan-token-risk`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-PAYMENT': scanPay,
+      },
+      body: JSON.stringify({
+        tokenAddress: 'DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263',
+        chain: 'solana',
+      }),
+    });
+    assert.equal(scanRes.status, 200);
+    const scanJson = await scanRes.json();
+    assert.equal(scanJson.summary.riskLevel, 'CRITICAL');
+    assert.equal(scanJson.summary.safeToTrade, false);
+    assert.equal(scanJson.scan.holderConcentration.top1Percent, 65);
+    const codes = scanJson.scan.findings.map((f) => f.code);
+    assert.ok(codes.includes('FREEZE_AUTHORITY_ACTIVE'));
+    assert.ok(codes.includes('TOKEN2022_PERMANENT_DELEGATE'));
+    assert.ok(codes.includes('TOKEN2022_EXTREME_TRANSFER_TAX'));
   });
 });
