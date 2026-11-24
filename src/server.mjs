@@ -94,10 +94,13 @@ function readRawBody(req) {
   return new Promise((resolveBody, rejectBody) => {
     const chunks = [];
     let total = 0;
+    let settled = false;
     req.on('data', (chunk) => {
+      if (settled) return;
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
-        req.destroy();
+        settled = true;
+        req.resume();
         const err = new Error(`Request payload exceeds ${MAX_BODY_BYTES} bytes limit.`);
         err.statusCode = 413;
         rejectBody(err);
@@ -105,8 +108,18 @@ function readRawBody(req) {
       }
       chunks.push(chunk);
     });
-    req.on('end', () => resolveBody(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', rejectBody);
+    req.on('end', () => {
+      if (!settled) {
+        settled = true;
+        resolveBody(Buffer.concat(chunks).toString('utf8'));
+      }
+    });
+    req.on('error', (err) => {
+      if (!settled) {
+        settled = true;
+        rejectBody(err);
+      }
+    });
   });
 }
 
