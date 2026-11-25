@@ -897,19 +897,19 @@ export const PAID_ENDPOINTS = [
     priceUsd: '0.01',
     amountAtomic: '10000',
     description:
-      'Real-time on-chain token security oracle for autonomous trading agents (`ElizaOS`, `Coinbase AgentKit`, `Virtuals`, `GOAT`). Queries Base Mainnet (`8453`) and Solana Mainnet RPCs in <400ms to detect EIP-1967 upgradeable proxies, unrenounced `owner()`, `SELFDESTRUCT`/`DELEGATECALL`/blacklist/fee-setter bytecode selectors, Uniswap V2/V3 & Aerodrome reserve depth + LP burn %, live `eth_call` `transfer()` honeypot simulation, Solana `mintAuthority`/`freezeAuthority`, Token-2022 `permanentDelegate`/`transferFeeConfig`/`transferHook` traps, and Top-1/Top-5/Top-10 holder whale concentration.',
+      'Real-time on-chain token security oracle for autonomous trading agents (`ElizaOS`, `Coinbase AgentKit`, `Virtuals`, `GOAT`, `@celo/buy`). Queries Base Mainnet (`8453`), Celo Mainnet (`42220`), and Solana Mainnet RPCs in <400ms to detect EIP-1967 upgradeable proxies, unrenounced `owner()`, `SELFDESTRUCT`/`DELEGATECALL`/blacklist/fee-setter bytecode selectors, Uniswap V2/V3, Ubeswap & Aerodrome reserve depth + LP burn %, live `eth_call` `transfer()` honeypot simulation, Solana `mintAuthority`/`freezeAuthority`, Token-2022 `permanentDelegate`/`transferFeeConfig`/`transferHook` traps, and Top-1/Top-5/Top-10 holder whale concentration.',
     inputSchema: {
       type: 'object',
       properties: {
         tokenAddress: {
           type: 'string',
           description:
-            'Base Mainnet ERC-20 contract address (0x + 40 hex) or Solana SPL / Token-2022 mint address (32–44 Base58 chars).',
+            'Base / Celo Mainnet ERC-20 contract address (0x + 40 hex) or Solana SPL / Token-2022 mint address (32–44 Base58 chars).',
         },
         chain: {
           type: 'string',
-          enum: ['auto', 'base', 'solana'],
-          description: 'Target chain: auto (default), base, or solana.',
+          enum: ['auto', 'base', 'celo', 'solana'],
+          description: 'Target chain: auto (default), base, celo, or solana.',
           default: 'auto',
         },
       },
@@ -919,12 +919,12 @@ export const PAID_ENDPOINTS = [
       tokenAddress: {
         type: 'string',
         required: true,
-        description: 'Base ERC-20 contract (0x...) or Solana SPL/Token-2022 mint address (Base58)',
+        description: 'Base/Celo ERC-20 contract (0x...) or Solana SPL/Token-2022 mint address (Base58)',
       },
       chain: {
         type: 'string',
         required: false,
-        description: 'Optional chain selector: auto, base, or solana',
+        description: 'Optional chain selector: auto, base, celo, or solana',
       },
     },
     outputSchemaShape: {
@@ -981,18 +981,18 @@ export const PAID_ENDPOINTS = [
         throw new InputValidationError('Field `tokenAddress` is required (0x Base ERC-20 or Base58 Solana mint).');
       }
       const ch = String(args.chain || 'auto').toLowerCase();
-      if (!['auto', 'base', 'evm', 'solana', 'sol'].includes(ch)) {
-        throw new InputValidationError('Field `chain` must be one of: auto, base, solana.');
+      if (!['auto', 'base', 'celo', 'evm', 'solana', 'sol'].includes(ch)) {
+        throw new InputValidationError('Field `chain` must be one of: auto, base, celo, solana.');
       }
       const isEvm = /^0x[0-9a-fA-F]{40}$/.test(addr);
       const isSol = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr);
       if (!isEvm && !isSol) {
         throw new InputValidationError(
-          'Field `tokenAddress` must be a valid 0x Base ERC-20 address or 32–44 character Base58 Solana mint.',
+          'Field `tokenAddress` must be a valid 0x Base/Celo ERC-20 address or 32–44 character Base58 Solana mint.',
         );
       }
-      if ((ch === 'base' || ch === 'evm') && !isEvm) {
-        throw new InputValidationError('Field `tokenAddress` must be a 0x + 40 hex address when `chain` is "base".');
+      if ((ch === 'base' || ch === 'celo' || ch === 'evm') && !isEvm) {
+        throw new InputValidationError('Field `tokenAddress` must be a 0x + 40 hex address when `chain` is "base" or "celo".');
       }
       if ((ch === 'solana' || ch === 'sol') && !isSol) {
         throw new InputValidationError('Field `tokenAddress` must be a Base58 mint when `chain` is "solana".');

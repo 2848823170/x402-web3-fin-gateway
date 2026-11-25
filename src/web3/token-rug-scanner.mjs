@@ -13,6 +13,11 @@ export const DEFAULT_BASE_SCAN_RPCS = [
   'https://base-rpc.publicnode.com',
 ];
 
+export const DEFAULT_CELO_SCAN_RPCS = [
+  'https://forno.celo.org',
+  'https://celo-rpc.publicnode.com',
+];
+
 export const DEFAULT_SOLANA_SCAN_RPCS = [
   'https://api.mainnet-beta.solana.com',
   'https://solana-rpc.publicnode.com',
@@ -24,6 +29,13 @@ const BASE_USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const UNISWAP_V2_FACTORY_BASE = '0x8909Dc15e40173Ff4699343b6eB8132c65e18eC6';
 const AERODROME_FACTORY_BASE = '0x420DD381b31aEf6683db6B902084cB0FFECe40Da';
 const UNISWAP_V3_FACTORY_BASE = '0x33128a8fC17869897dcE68Ed026d694621f6FDfD';
+
+// Celo Mainnet DEX & Canonical Addresses
+const CELO_NATIVE_ERC20 = '0x471EcE3750Da237f93B8E339c536989b8978a438';
+const CELO_USDC = '0xcebA9300f2b948710d2653dD7B07f33A8B32118C';
+const UBESWAP_V2_FACTORY_CELO = '0x62d5b84bE28a183aBB507E125B384122D2C25fAE';
+const UNISWAP_V3_FACTORY_CELO = '0xAfE208a311B21f13EF87E33A90049fC17A7acDEc';
+
 const ZERO_ADDR = '0x0000000000000000000000000000000000000000';
 const DEAD_ADDR = '0x000000000000000000000000000000000000dEaD';
 const PROBE_RECIPIENT = '0x0000000000000000000000000000000000010402';
@@ -32,11 +44,19 @@ const PROBE_RECIPIENT = '0x0000000000000000000000000000000000010402';
 const EIP1967_IMPL_SLOT = '0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc';
 const EIP1967_ADMIN_SLOT = '0xb53127684a568b3173ae13b9f8a6016e243e63b6e8ee1178d6a717850b5d6103';
 
-// Known Canonical Regulated Assets (prevents false-positive scam flags on USDC / WETH / SOL)
+// Known Canonical Regulated Assets (prevents false-positive scam flags on USDC / WETH / CELO / SOL)
 const CANONICAL_BASE_TOKENS = new Map([
   ['0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', { symbol: 'USDC', issuer: 'Circle (Regulated FiatTokenProxy)' }],
   ['0x4200000000000000000000000000000000000006', { symbol: 'WETH', issuer: 'Base Canonical Wrapped Ether' }],
   ['0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf', { symbol: 'cbBTC', issuer: 'Coinbase Wrapped BTC (Regulated)' }],
+]);
+
+const CANONICAL_CELO_TOKENS = new Map([
+  ['0xceba9300f2b948710d2653dd7b07f33a8b32118c', { symbol: 'USDC', issuer: 'Circle Native Celo USDC (Regulated)' }],
+  ['0x48065fbbe25f71c9282ddf5e1cd6d6a887483d5e', { symbol: 'USDT', issuer: 'Tether USD on Celo (Regulated)' }],
+  ['0xd2ab3c9a02dbbab236bfec45d1d755df4267f771', { symbol: 'USAT', issuer: 'Tether America USD on Celo (Regulated)' }],
+  ['0x765de816845861e75a25fca122bb6898b8b1282a', { symbol: 'USDm', issuer: 'Mento Dollar on Celo' }],
+  ['0x471ece3750da237f93b8e339c536989b8978a438', { symbol: 'CELO', issuer: 'Celo Native GoldToken' }],
 ]);
 
 const CANONICAL_SOLANA_MINTS = new Map([
@@ -196,14 +216,46 @@ function scoreToVerdict(score) {
   return { riskScore: clamped, riskLevel: 'LOW', safeToTrade: true, recommendation: 'PROCEED_STANDARD_SLIPPAGE' };
 }
 
-async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedAt }) {
+const EVM_CHAIN_CONFIGS = {
+  base: {
+    chain: 'base',
+    chainId: 8453,
+    label: 'Base Mainnet',
+    nativeWrapped: BASE_WETH,
+    nativeSymbol: 'WETH',
+    nativeUsdWeight: 2500n,
+    usdc: BASE_USDC,
+    v2Factory: UNISWAP_V2_FACTORY_BASE,
+    v2DexName: 'uniswap-v2',
+    aeroFactory: AERODROME_FACTORY_BASE,
+    v3Factory: UNISWAP_V3_FACTORY_BASE,
+    canonicalMap: CANONICAL_BASE_TOKENS,
+  },
+  celo: {
+    chain: 'celo',
+    chainId: 42220,
+    label: 'Celo Mainnet',
+    nativeWrapped: CELO_NATIVE_ERC20,
+    nativeSymbol: 'CELO',
+    nativeUsdWeight: 1n,
+    usdc: CELO_USDC,
+    v2Factory: UBESWAP_V2_FACTORY_CELO,
+    v2DexName: 'ubeswap-v2',
+    aeroFactory: null,
+    v3Factory: UNISWAP_V3_FACTORY_CELO,
+    canonicalMap: CANONICAL_CELO_TOKENS,
+  },
+};
+
+async function scanEvmErc20Token({ tokenAddress, rpcUrls, chainKey = 'base', fetchFn, startedAt }) {
+  const cfg = EVM_CHAIN_CONFIGS[chainKey] || EVM_CHAIN_CONFIGS.base;
   const checksumToken = toEip55Address(tokenAddress);
   const lowerToken = checksumToken.toLowerCase();
-  const canonical = CANONICAL_BASE_TOKENS.get(lowerToken) || null;
+  const canonical = cfg.canonicalMap.get(lowerToken) || null;
 
   const tPad = padAddress32(checksumToken);
-  const wethPad = padAddress32(BASE_WETH);
-  const usdcPad = padAddress32(BASE_USDC);
+  const wethPad = padAddress32(cfg.nativeWrapped);
+  const usdcPad = padAddress32(cfg.usdc);
 
   // Batch 1: Contract code, EIP-1967 proxy slots, ERC-20 metadata/owner/paused, and DEX pools
   const batch1 = [
@@ -216,23 +268,24 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
     { jsonrpc: '2.0', id: 7, method: 'eth_call', params: [{ to: checksumToken, data: '0x18160ddd' }, 'latest'] }, // totalSupply()
     { jsonrpc: '2.0', id: 8, method: 'eth_call', params: [{ to: checksumToken, data: '0x8da5cb5b' }, 'latest'] }, // owner()
     { jsonrpc: '2.0', id: 9, method: 'eth_call', params: [{ to: checksumToken, data: '0x5c975abb' }, 'latest'] }, // paused()
-    // Uniswap V2 getPair(token, WETH) -> 0xe6a43905
-    { jsonrpc: '2.0', id: 10, method: 'eth_call', params: [{ to: UNISWAP_V2_FACTORY_BASE, data: `0xe6a43905${tPad}${wethPad}` }, 'latest'] },
-    // Aerodrome Classic getPool(token, WETH, false) -> 0x79bc57d5
-    { jsonrpc: '2.0', id: 11, method: 'eth_call', params: [{ to: AERODROME_FACTORY_BASE, data: `0x79bc57d5${tPad}${wethPad}${'0'.repeat(64)}` }, 'latest'] },
-    // Uniswap V3 getPool(token, WETH, 3000) & getPool(token, USDC, 500) -> 0x1698ee82
-    { jsonrpc: '2.0', id: 12, method: 'eth_call', params: [{ to: UNISWAP_V3_FACTORY_BASE, data: `0x1698ee82${tPad}${wethPad}${padUint32(3000n)}` }, 'latest'] },
-    { jsonrpc: '2.0', id: 13, method: 'eth_call', params: [{ to: UNISWAP_V3_FACTORY_BASE, data: `0x1698ee82${tPad}${usdcPad}${padUint32(500n)}` }, 'latest'] },
+    // V2 Factory getPair(token, nativeWrapped) -> 0xe6a43905
+    { jsonrpc: '2.0', id: 10, method: 'eth_call', params: [{ to: cfg.v2Factory, data: `0xe6a43905${tPad}${wethPad}` }, 'latest'] },
+    ...(cfg.aeroFactory
+      ? [{ jsonrpc: '2.0', id: 11, method: 'eth_call', params: [{ to: cfg.aeroFactory, data: `0x79bc57d5${tPad}${wethPad}${'0'.repeat(64)}` }, 'latest'] }]
+      : []),
+    // Uniswap V3 getPool(token, nativeWrapped, 3000) & getPool(token, USDC, 500) -> 0x1698ee82
+    { jsonrpc: '2.0', id: 12, method: 'eth_call', params: [{ to: cfg.v3Factory, data: `0x1698ee82${tPad}${wethPad}${padUint32(3000n)}` }, 'latest'] },
+    { jsonrpc: '2.0', id: 13, method: 'eth_call', params: [{ to: cfg.v3Factory, data: `0x1698ee82${tPad}${usdcPad}${padUint32(500n)}` }, 'latest'] },
   ];
 
-  const { url: rpcUsed, json: res1Raw } = await postJsonRpc(baseRpcUrls, batch1, fetchFn);
+  const { url: rpcUsed, json: res1Raw } = await postJsonRpc(rpcUrls, batch1, fetchFn);
   const byId = new Map((Array.isArray(res1Raw) ? res1Raw : []).map((r) => [r.id, r.result]));
 
   const bytecode = byId.get(1) || '0x';
   if (!bytecode || bytecode === '0x') {
     return {
-      chain: 'base',
-      chainId: 8453,
+      chain: cfg.chain,
+      chainId: cfg.chainId,
       tokenAddress: checksumToken,
       latencyMs: Date.now() - startedAt,
       rpcUsed,
@@ -242,7 +295,7 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
         {
           severity: 'CRITICAL',
           code: 'NO_CONTRACT_BYTECODE',
-          message: `Address ${checksumToken} has zero contract bytecode on Base Mainnet (EOA or undeployed address).`,
+          message: `Address ${checksumToken} has zero contract bytecode on ${cfg.label} (EOA or undeployed address).`,
         },
       ],
     };
@@ -267,14 +320,14 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
   const isPaused = parseUintWord(byId.get(9)) === 1n;
 
   const uniV2Pair = parseAddressWord(byId.get(10));
-  const aeroPool = parseAddressWord(byId.get(11));
+  const aeroPool = cfg.aeroFactory ? parseAddressWord(byId.get(11)) : ZERO_ADDR;
   const uniV3WethPool = parseAddressWord(byId.get(12));
   const uniV3UsdcPool = parseAddressWord(byId.get(13));
 
   const candidatePools = [
-    uniV2Pair !== ZERO_ADDR ? { dex: 'uniswap-v2', address: uniV2Pair, style: 'v2' } : null,
+    uniV2Pair !== ZERO_ADDR ? { dex: cfg.v2DexName, address: uniV2Pair, style: 'v2' } : null,
     aeroPool !== ZERO_ADDR ? { dex: 'aerodrome-v2', address: aeroPool, style: 'v2' } : null,
-    uniV3WethPool !== ZERO_ADDR ? { dex: 'uniswap-v3-weth-0.3%', address: uniV3WethPool, style: 'v3' } : null,
+    uniV3WethPool !== ZERO_ADDR ? { dex: `uniswap-v3-${cfg.nativeSymbol.toLowerCase()}-0.3%`, address: uniV3WethPool, style: 'v3' } : null,
     uniV3UsdcPool !== ZERO_ADDR ? { dex: 'uniswap-v3-usdc-0.05%', address: uniV3UsdcPool, style: 'v3' } : null,
   ].filter(Boolean);
 
@@ -287,8 +340,8 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
     const baseId = 100 + idx * 10;
     const poolPad = padAddress32(p.address);
     batch2.push({ jsonrpc: '2.0', id: baseId + 1, method: 'eth_call', params: [{ to: checksumToken, data: `0x70a08231${poolPad}` }, 'latest'] });
-    batch2.push({ jsonrpc: '2.0', id: baseId + 2, method: 'eth_call', params: [{ to: BASE_WETH, data: `0x70a08231${poolPad}` }, 'latest'] });
-    batch2.push({ jsonrpc: '2.0', id: baseId + 3, method: 'eth_call', params: [{ to: BASE_USDC, data: `0x70a08231${poolPad}` }, 'latest'] });
+    batch2.push({ jsonrpc: '2.0', id: baseId + 2, method: 'eth_call', params: [{ to: cfg.nativeWrapped, data: `0x70a08231${poolPad}` }, 'latest'] });
+    batch2.push({ jsonrpc: '2.0', id: baseId + 3, method: 'eth_call', params: [{ to: cfg.usdc, data: `0x70a08231${poolPad}` }, 'latest'] });
     if (p.style === 'v2') {
       batch2.push({ jsonrpc: '2.0', id: baseId + 4, method: 'eth_call', params: [{ to: p.address, data: '0x18160ddd' }, 'latest'] });
       batch2.push({ jsonrpc: '2.0', id: baseId + 5, method: 'eth_call', params: [{ to: p.address, data: `0x70a08231${padAddress32(ZERO_ADDR)}` }, 'latest'] });
@@ -312,14 +365,14 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
   let res2Map = new Map();
   let res2RawMap = new Map();
   if (batch2.length > 0) {
-    const { json: res2Raw } = await postJsonRpc([rpcUsed, ...baseRpcUrls], batch2, fetchFn);
+    const { json: res2Raw } = await postJsonRpc([rpcUsed, ...rpcUrls], batch2, fetchFn);
     if (Array.isArray(res2Raw)) {
       res2Map = new Map(res2Raw.map((r) => [r.id, r.result]));
       res2RawMap = new Map(res2Raw.map((r) => [r.id, r]));
     }
   }
 
-  // Score each discovered pool by USD-equivalent quote depth (1 WETH ~= 2500 USDC rough weight) and pick the deepest!
+  // Score each discovered pool by USD-equivalent quote depth and pick the deepest!
   let primaryAmmPool = null;
   let primaryPoolIdx = -1;
   let bestDepthScore = -1n;
@@ -332,8 +385,7 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
     const usdcBal = parseUintWord(res2Map.get(baseId + 3));
     totalWethAcrossPools += wethBal;
     totalUsdcAcrossPools += usdcBal;
-    // Normalize to 6-decimal USD-like units for comparison (1 WETH ~ 2500 * 1e6 = wethBal * 2500 / 1e12)
-    const depth = (wethBal * 2500n) / 1_000_000_000_000n + usdcBal;
+    const depth = (wethBal * cfg.nativeUsdWeight) / 1_000_000_000_000n + usdcBal;
     if (depth > bestDepthScore) {
       bestDepthScore = depth;
       primaryAmmPool = p;
@@ -351,7 +403,7 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
     findings.push({
       severity: 'INFO',
       code: 'VERIFIED_CANONICAL_ASSET',
-      message: `Verified canonical Base Mainnet asset: ${canonical.symbol} (${canonical.issuer}).`,
+      message: `Verified canonical ${cfg.label} asset: ${canonical.symbol} (${canonical.issuer}).`,
     });
   }
 
@@ -437,12 +489,12 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
     transferSimulation: 'not_tested',
   };
 
-  if (!primaryAmmPool && lowerToken !== BASE_WETH.toLowerCase() && !canonical) {
+  if (!primaryAmmPool && lowerToken !== cfg.nativeWrapped.toLowerCase() && !canonical) {
     riskScore += 40;
     findings.push({
       severity: 'HIGH',
       code: 'NO_MAJOR_DEX_LIQUIDITY_FOUND',
-      message: 'No Uniswap V2, Uniswap V3, or Aerodrome WETH/USDC pool discovered on Base Mainnet.',
+      message: `No Uniswap V3 or ${cfg.v2DexName} liquidity pool discovered on ${cfg.label}.`,
     });
   } else if (primaryAmmPool) {
     const baseId = 100 + primaryPoolIdx * 10;
@@ -469,13 +521,14 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
       }
     }
 
-    // Check shallow aggregate liquidity (< 0.15 WETH and < $500 USDC)
-    if (!canonical && totalWethAcrossPools < 150000000000000000n && totalUsdcAcrossPools < 500_000000n) {
+    // Check shallow aggregate liquidity
+    const minNative = cfg.chain === 'celo' ? 300_000000000000000000n : 150000000000000000n;
+    if (!canonical && totalWethAcrossPools < minNative && totalUsdcAcrossPools < 500_000000n) {
       riskScore += 30;
       findings.push({
         severity: 'HIGH',
         code: 'EXTREMELY_SHALLOW_LIQUIDITY',
-        message: `Aggregate DEX reserves are critically thin (${liquidity.poolWethReserve} WETH / ${liquidity.poolUsdcReserve} USDC) — extreme rug/slippage risk.`,
+        message: `Aggregate DEX reserves are critically thin (${liquidity.poolWethReserve} ${cfg.nativeSymbol} / ${liquidity.poolUsdcReserve} USDC) — extreme rug/slippage risk.`,
       });
     }
 
@@ -507,8 +560,8 @@ async function scanBaseErc20Token({ tokenAddress, baseRpcUrls, fetchFn, startedA
   }
 
   return {
-    chain: 'base',
-    chainId: 8453,
+    chain: cfg.chain,
+    chainId: cfg.chainId,
     tokenAddress: checksumToken,
     latencyMs: Date.now() - startedAt,
     rpcUsed,
@@ -783,6 +836,7 @@ export async function scanOnChainTokenRugRisk({
   tokenAddress,
   chain = 'auto',
   baseRpcUrls = DEFAULT_BASE_SCAN_RPCS,
+  celoRpcUrls = DEFAULT_CELO_SCAN_RPCS,
   solanaRpcUrls = DEFAULT_SOLANA_SCAN_RPCS,
   fetchFn = globalThis.fetch,
 } = {}) {
@@ -793,12 +847,12 @@ export async function scanOnChainTokenRugRisk({
   let targetChain = normalizedChain;
   if (targetChain === 'auto') {
     if (/^0x[0-9a-fA-F]{40}$/.test(addr)) {
-      targetChain = 'base';
+      targetChain = CANONICAL_CELO_TOKENS.has(addr.toLowerCase()) ? 'celo' : 'base';
     } else if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(addr)) {
       targetChain = 'solana';
     } else {
       throw new Error(
-        'Unable to auto-detect token address format. Expected 0x + 40 hex (Base ERC-20) or 32–44 char Base58 (Solana SPL/Token-2022 mint).',
+        'Unable to auto-detect token address format. Expected 0x + 40 hex (Base/Celo ERC-20) or 32–44 char Base58 (Solana SPL/Token-2022 mint).',
       );
     }
   }
@@ -807,7 +861,14 @@ export async function scanOnChainTokenRugRisk({
     if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
       throw new Error('Invalid Base ERC-20 contract address: expected 0x + 40 hex characters.');
     }
-    return scanBaseErc20Token({ tokenAddress: addr, baseRpcUrls, fetchFn, startedAt });
+    return scanEvmErc20Token({ tokenAddress: addr, rpcUrls: baseRpcUrls, chainKey: 'base', fetchFn, startedAt });
+  }
+
+  if (targetChain === 'celo') {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(addr)) {
+      throw new Error('Invalid Celo ERC-20 contract address: expected 0x + 40 hex characters.');
+    }
+    return scanEvmErc20Token({ tokenAddress: addr, rpcUrls: celoRpcUrls, chainKey: 'celo', fetchFn, startedAt });
   }
 
   if (targetChain === 'solana' || targetChain === 'sol') {
@@ -817,5 +878,5 @@ export async function scanOnChainTokenRugRisk({
     return scanSolanaMint({ tokenAddress: addr, solanaRpcUrls, fetchFn, startedAt });
   }
 
-  throw new Error(`Unsupported chain "${chain}". Supported live RPC chains: "auto", "base", "solana".`);
+  throw new Error(`Unsupported chain "${chain}". Supported live RPC chains: "auto", "base", "celo", "solana".`);
 }

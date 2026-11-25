@@ -24,7 +24,14 @@ import {
   BASE_USDC_ASSET,
   BASE_V1_NETWORK,
   buildPaymentRequirementsV1,
+  CELO_CAIP2_NETWORK,
+  CELO_CHAIN_ID,
+  CELO_USDC_ASSET,
+  CELO_USDT_ASSET,
+  CELO_V1_NETWORK,
   DEFAULT_BASE_RPC_URLS,
+  DEFAULT_CELO_FACILITATOR_URLS,
+  DEFAULT_CELO_RPC_URLS,
   DEFAULT_FACILITATOR_URLS,
   extractPaymentCredential,
   PAY_TO,
@@ -64,7 +71,7 @@ function setCommonHeaders(res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Accept, Authorization, X-PAYMENT, PAYMENT-SIGNATURE, X-TX-HASH, X-BASE-TX-HASH, Mcp-Session-Id, MCP-Protocol-Version',
+    'Content-Type, Accept, Authorization, X-PAYMENT, PAYMENT-SIGNATURE, X-TX-HASH, X-BASE-TX-HASH, X-CELO-TX-HASH, Mcp-Session-Id, MCP-Protocol-Version',
   );
   res.setHeader(
     'Access-Control-Expose-Headers',
@@ -420,11 +427,53 @@ function buildLandingHtml(baseUrl, payTo) {
 </html>`;
 }
 
+function buildTermsHtml(baseUrl, payTo) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Terms, Data Provenance &amp; Support — x402 Web3 Security Gateway</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; background: #0b1120; color: #e2e8f0; margin: 0; padding: 2.5rem 1.25rem; line-height: 1.65; }
+    .wrap { max-width: 820px; margin: 0 auto; }
+    h1, h2 { color: #f8fafc; }
+    a { color: #38bdf8; }
+    code { background: #111827; padding: 0.15rem 0.4rem; border-radius: 4px; }
+    .card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 1.25rem; margin: 1.25rem 0; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Terms of Service, Refund Policy &amp; Data Provenance</h1>
+    <div class="card">
+      <h2>1. Operator &amp; Support Contact</h2>
+      <p>Operated directly by <strong>Shulang Chen</strong> (<a href="https://github.com/2848823170">@2848823170</a>). Direct payments settle on Base Mainnet (<code>USDC</code>) and Celo Mainnet (<code>USDC</code>, <code>USDT</code>) to <code>${payTo}</code>.</p>
+      <p>Support &amp; refund inquiries: <a href="mailto:chenshulang0223@gmail.com">chenshulang0223@gmail.com</a> or <a href="https://github.com/2848823170/x402-web3-fin-gateway/issues">github.com/2848823170/x402-web3-fin-gateway/issues</a>.</p>
+    </div>
+    <div class="card">
+      <h2>2. Pre-Settlement Validation &amp; Refund Policy</h2>
+      <p>All paid endpoints validate request arguments <strong>before</strong> calling any x402 facilitator <code>/settle</code> endpoint: malformed or incomplete requests return <code>HTTP 400</code> with <code>settled: false</code> and charge <code>0</code> tokens. Additionally, the deterministic tool computation executes prior to on-chain settlement so internal errors never debit the caller.</p>
+      <p>If a settled payment (verifiable by transaction hash on Base or Celo) ever fails to return a valid HTTP 200 tool payload due to network interruption, email the settlement transaction hash and endpoint URL to <a href="mailto:chenshulang0223@gmail.com">chenshulang0223@gmail.com</a> (or open a GitHub issue) for a 100% on-chain refund to the original paying wallet within 48 hours.</p>
+    </div>
+    <div class="card">
+      <h2>3. Data Sources, Privacy &amp; Non-Advisory Notice</h2>
+      <p>Address checksum/curve validation, EVM calldata decoding, EIP-712 typed-data risk auditing, CSV repair, table extraction, and statement reconciliation are computed 100% deterministically in-memory by our own open-source engine (<a href="https://github.com/2848823170/x402-web3-fin-gateway">MIT License</a>). Token risk scans read public permissionless blockchain JSON-RPC state on Base Mainnet (<code>8453</code>), Celo Mainnet (<code>42220</code>), and Solana Mainnet. Request payloads are processed statelessly in memory and are not stored or resold.</p>
+      <p>Outputs are automated technical risk signals for software and agent workflows, not financial, investment, or legal advice.</p>
+      <p><a href="${baseUrl}/">&larr; Back to Gateway Overview</a></p>
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
 export function createGatewayServer({
   payTo = PAY_TO,
   publicBaseUrl = process.env.PUBLIC_BASE_URL || '',
   facilitatorUrls = parseCsvEnv(process.env.X402_FACILITATOR_URLS, DEFAULT_FACILITATOR_URLS),
+  celoFacilitatorUrls = parseCsvEnv(process.env.CELO_FACILITATOR_URLS, DEFAULT_CELO_FACILITATOR_URLS),
   baseRpcUrls = parseCsvEnv(process.env.BASE_RPC_URLS, DEFAULT_BASE_RPC_URLS),
+  celoRpcUrls = parseCsvEnv(process.env.CELO_RPC_URLS, DEFAULT_CELO_RPC_URLS),
   ledgerPath = process.env.LEDGER_PATH || resolve(__dirname, '..', 'data', 'settled_ledger.jsonl'),
   fetchFn = globalThis.fetch,
   nowFn = () => Math.floor(Date.now() / 1000),
@@ -433,7 +482,9 @@ export function createGatewayServer({
   const engine = new X402GatewayEngine({
     payTo,
     facilitatorUrls,
+    celoFacilitatorUrls,
     baseRpcUrls,
+    celoRpcUrls,
     ledgerPath,
     fetchFn,
     nowFn,
@@ -501,6 +552,31 @@ export function createGatewayServer({
         res.statusCode = 200;
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.end('1119e5789a152623346fd91588d60e2d');
+        return;
+      }
+
+      if (method === 'GET' && (pathname === '/terms' || pathname === '/legal')) {
+        const accept = String(req.headers.accept || '');
+        if (accept.includes('application/json') && !accept.includes('text/html')) {
+          sendJson(res, 200, {
+            operator: 'Shulang Chen (@2848823170)',
+            contact: 'chenshulang0223@gmail.com',
+            repository: 'https://github.com/2848823170/x402-web3-fin-gateway',
+            supportUrl: 'https://github.com/2848823170/x402-web3-fin-gateway/issues',
+            payTo: engine.payTo,
+            supportedNetworks: [BASE_CAIP2_NETWORK, CELO_CAIP2_NETWORK],
+            supportedAssets: {
+              base: [BASE_USDC_ASSET],
+              celo: [CELO_USDC_ASSET, CELO_USDT_ASSET],
+            },
+            refundPolicy:
+              'Invalid inputs return HTTP 400 prior to settlement ($0 charged). If a settled transaction fails to return its HTTP 200 payload, email chenshulang0223@gmail.com or open a GitHub issue with the txHash for a full on-chain refund to the payer wallet within 48 hours.',
+            dataProvenance:
+              'Own open-source deterministic static/cryptographic analysis engine plus public permissionless JSON-RPC state on Base (8453), Celo (42220), and Solana Mainnet.',
+          });
+          return;
+        }
+        sendHtml(res, 200, buildTermsHtml(baseUrl, engine.payTo));
         return;
       }
 

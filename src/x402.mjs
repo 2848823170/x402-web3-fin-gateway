@@ -1,12 +1,16 @@
 /**
  * Native Direct 0%-Fee x402 (HTTP 402 Payment Required) Engine (`x402.mjs`).
  *
- * - Asset: Base Mainnet USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`, chainId 8453, 6 decimals)
- * - Recipient (`payTo`): `0xfEbDbB880C7f323c145d61683874a45540208a68` (100% direct, 0% middleman fee)
+ * - Primary EVM Recipient (`payTo`): `0xfEbDbB880C7f323c145d61683874a45540208a68` (100% direct, 0% middleman fee)
+ * - Supported Networks & EIP-3009 Stablecoin Assets:
+ *   1. Base Mainnet (`base` / `eip155:8453`, chainId 8453): USDC (`0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`)
+ *   2. Celo Mainnet (`celo` / `eip155:42220`, chainId 42220):
+ *      - USDC (`0xcebA9300f2b948710d2653dD7B07f33A8B32118C`, EIP-712 `{ name: "USDC", version: "2" }`)
+ *      - USDT (`0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e`, EIP-712 `{ name: "Tether USD", version: "1" }`)
  * - Protocol compatibility:
- *   1. x402 v1 (`X-PAYMENT` / `X-PAYMENT-RESPONSE`, `network: "base"`, JSON 402 body + `outputSchema`)
- *   2. x402 v2 (`PAYMENT-SIGNATURE` / `PAYMENT-REQUIRED` / `PAYMENT-RESPONSE`, `network: "eip155:8453"`)
- *   3. Direct Base Mainnet USDC on-chain receipt (`X-TX-HASH`, verified via `eth_getTransactionReceipt`)
+ *   1. x402 v1 (`X-PAYMENT` / `X-PAYMENT-RESPONSE`, `network: "base" | "celo"`, JSON 402 body + `outputSchema`)
+ *   2. x402 v2 (`PAYMENT-SIGNATURE` / `PAYMENT-REQUIRED` / `PAYMENT-RESPONSE`, `network: "eip155:8453" | "eip155:42220"`)
+ *   3. Direct Mainnet ERC-20 receipt (`X-TX-HASH` / `X-CELO-TX-HASH`, verified via `eth_getTransactionReceipt`)
  */
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -22,6 +26,33 @@ export const USDC_EIP712_EXTRA = Object.freeze({
   version: '2',
 });
 
+export const CELO_CHAIN_ID = 42220;
+export const CELO_CAIP2_NETWORK = 'eip155:42220';
+export const CELO_V1_NETWORK = 'celo';
+export const CELO_USDC_ASSET = '0xcebA9300f2b948710d2653dD7B07f33A8B32118C';
+export const CELO_USDC_EIP712_EXTRA = Object.freeze({
+  name: 'USDC',
+  version: '2',
+});
+export const CELO_USDT_ASSET = '0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e';
+export const CELO_USDT_EIP712_EXTRA = Object.freeze({
+  name: 'Tether USD',
+  version: '1',
+});
+
+export const CELO_PAYMENT_ASSETS = Object.freeze([
+  {
+    symbol: 'USDC',
+    asset: CELO_USDC_ASSET,
+    extra: CELO_USDC_EIP712_EXTRA,
+  },
+  {
+    symbol: 'USDT',
+    asset: CELO_USDT_ASSET,
+    extra: CELO_USDT_EIP712_EXTRA,
+  },
+]);
+
 export const ERC20_TRANSFER_TOPIC0 =
   '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
 
@@ -30,9 +61,18 @@ export const DEFAULT_FACILITATOR_URLS = [
   'https://x402.org/facilitator',
 ];
 
+export const DEFAULT_CELO_FACILITATOR_URLS = [
+  'https://facilitator.ultravioletadao.xyz',
+];
+
 export const DEFAULT_BASE_RPC_URLS = [
   'https://mainnet.base.org',
   'https://base-rpc.publicnode.com',
+];
+
+export const DEFAULT_CELO_RPC_URLS = [
+  'https://forno.celo.org',
+  'https://celo-rpc.publicnode.com',
 ];
 
 function toBase64Json(obj) {
@@ -149,17 +189,22 @@ export class SettledLedger {
   }
 }
 
-export function buildPaymentRequirementsV1(endpoint, resourceUrl, payTo = PAY_TO) {
+export function buildPaymentRequirementsV1(
+  endpoint,
+  resourceUrl,
+  payTo = PAY_TO,
+  { network = BASE_V1_NETWORK, asset = BASE_USDC_ASSET, extra = USDC_EIP712_EXTRA } = {},
+) {
   return {
     scheme: 'exact',
-    network: BASE_V1_NETWORK,
+    network,
     maxAmountRequired: endpoint.amountAtomic,
     resource: resourceUrl,
     description: endpoint.description,
     mimeType: 'application/json',
     payTo,
     maxTimeoutSeconds: 300,
-    asset: BASE_USDC_ASSET,
+    asset,
     outputSchema: {
       input: {
         type: 'http',
@@ -169,20 +214,44 @@ export function buildPaymentRequirementsV1(endpoint, resourceUrl, payTo = PAY_TO
       },
       output: endpoint.outputSchemaShape,
     },
-    extra: { ...USDC_EIP712_EXTRA },
+    extra: { ...extra },
   };
 }
 
-export function buildPaymentRequirementsV2(endpoint, payTo = PAY_TO) {
+export function buildPaymentRequirementsV2(
+  endpoint,
+  payTo = PAY_TO,
+  { network = BASE_CAIP2_NETWORK, asset = BASE_USDC_ASSET, extra = USDC_EIP712_EXTRA } = {},
+) {
   return {
     scheme: 'exact',
-    network: BASE_CAIP2_NETWORK,
+    network,
     amount: endpoint.amountAtomic,
-    asset: BASE_USDC_ASSET,
+    asset,
     payTo,
     maxTimeoutSeconds: 300,
-    extra: { ...USDC_EIP712_EXTRA },
+    extra: { ...extra },
   };
+}
+
+export function buildCeloPaymentRequirementsV1(endpoint, resourceUrl, payTo = PAY_TO) {
+  return CELO_PAYMENT_ASSETS.map((tok) =>
+    buildPaymentRequirementsV1(endpoint, resourceUrl, payTo, {
+      network: CELO_V1_NETWORK,
+      asset: tok.asset,
+      extra: tok.extra,
+    }),
+  );
+}
+
+export function buildCeloPaymentRequirementsV2(endpoint, payTo = PAY_TO) {
+  return CELO_PAYMENT_ASSETS.map((tok) =>
+    buildPaymentRequirementsV2(endpoint, payTo, {
+      network: CELO_CAIP2_NETWORK,
+      asset: tok.asset,
+      extra: tok.extra,
+    }),
+  );
 }
 
 export function buildBazaarExtensions(endpoint) {
@@ -228,15 +297,18 @@ export function buildBazaarExtensions(endpoint) {
 }
 
 export function build402Response(endpoint, resourceUrl, errorMessage = 'X-PAYMENT header is required', payTo = PAY_TO) {
-  const v1Requirement = buildPaymentRequirementsV1(endpoint, resourceUrl, payTo);
+  const v1Base = buildPaymentRequirementsV1(endpoint, resourceUrl, payTo);
+  const v1Celo = buildCeloPaymentRequirementsV1(endpoint, resourceUrl, payTo);
   const extensions = buildBazaarExtensions(endpoint);
   const v1Body = {
     x402Version: 1,
     error: errorMessage,
-    accepts: [v1Requirement],
+    accepts: [v1Base, ...v1Celo],
     extensions,
   };
 
+  const v2Base = buildPaymentRequirementsV2(endpoint, payTo);
+  const v2Celo = buildCeloPaymentRequirementsV2(endpoint, payTo);
   const v2HeaderPayload = {
     x402Version: 2,
     error: errorMessage,
@@ -245,7 +317,7 @@ export function build402Response(endpoint, resourceUrl, errorMessage = 'X-PAYMEN
       description: endpoint.description,
       mimeType: 'application/json',
     },
-    accepts: [buildPaymentRequirementsV2(endpoint, payTo)],
+    accepts: [v2Base, ...v2Celo],
     extensions,
   };
 
@@ -281,10 +353,20 @@ export function extractPaymentCredential(reqHeaders = {}, mcpMeta = null) {
   if (mcpMeta && mcpMeta['x402/payment']) {
     return { kind: 'x402', source: 'mcp-meta', raw: mcpMeta['x402/payment'] };
   }
+  const celoTxHash = reqHeaders['x-celo-tx-hash'];
+  if (celoTxHash) {
+    return {
+      kind: 'tx-hash',
+      chainKind: 'celo',
+      source: 'x-celo-tx-hash',
+      raw: (Array.isArray(celoTxHash) ? celoTxHash[0] : celoTxHash).trim(),
+    };
+  }
   const txHash = reqHeaders['x-tx-hash'] || reqHeaders['x-base-tx-hash'];
   if (txHash) {
     return {
       kind: 'tx-hash',
+      chainKind: 'base',
       source: 'x-tx-hash',
       raw: (Array.isArray(txHash) ? txHash[0] : txHash).trim(),
     };
@@ -296,14 +378,18 @@ export class X402GatewayEngine {
   constructor({
     payTo = PAY_TO,
     facilitatorUrls = DEFAULT_FACILITATOR_URLS,
+    celoFacilitatorUrls = DEFAULT_CELO_FACILITATOR_URLS,
     baseRpcUrls = DEFAULT_BASE_RPC_URLS,
+    celoRpcUrls = DEFAULT_CELO_RPC_URLS,
     ledgerPath = null,
     fetchFn = globalThis.fetch,
     nowFn = () => Math.floor(Date.now() / 1000),
   } = {}) {
     this.payTo = payTo;
     this.facilitatorUrls = facilitatorUrls.map((u) => u.replace(/\/+$/, ''));
+    this.celoFacilitatorUrls = celoFacilitatorUrls.map((u) => u.replace(/\/+$/, ''));
     this.baseRpcUrls = baseRpcUrls;
+    this.celoRpcUrls = celoRpcUrls;
     this.ledger = new SettledLedger(ledgerPath);
     this.fetchFn = fetchFn;
     this.nowFn = nowFn;
@@ -318,7 +404,7 @@ export class X402GatewayEngine {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          'User-Agent': 'x402-web3-fin-gateway/1.0',
+          'User-Agent': 'x402-web3-fin-gateway/1.1',
         },
         body: JSON.stringify(body),
         signal: controller.signal,
@@ -355,10 +441,12 @@ export class X402GatewayEngine {
     if (scheme !== 'exact') {
       return { ok: false, error: `Unsupported payment scheme "${scheme || ''}". Expected "exact".` };
     }
-    if (network !== BASE_V1_NETWORK && network !== BASE_CAIP2_NETWORK) {
+    const isBase = network === BASE_V1_NETWORK || network === BASE_CAIP2_NETWORK;
+    const isCelo = network === CELO_V1_NETWORK || network === CELO_CAIP2_NETWORK;
+    if (!isBase && !isCelo) {
       return {
         ok: false,
-        error: `Unsupported payment network "${network || ''}". Expected "base" or "eip155:8453" (Base Mainnet).`,
+        error: `Unsupported payment network "${network || ''}". Expected "base" / "eip155:8453" or "celo" / "eip155:42220".`,
       };
     }
 
@@ -405,7 +493,7 @@ export class X402GatewayEngine {
     if (valueBig < requiredBig) {
       return {
         ok: false,
-        error: `Insufficient USDC payment amount: got ${valueBig.toString()}, required at least ${requiredBig.toString()} atomic units ($${endpoint.priceUsd} USDC).`,
+        error: `Insufficient USDC payment amount: got ${valueBig.toString()}, required at least ${requiredBig.toString()} atomic units ($${endpoint.priceUsd} USD).`,
       };
     }
 
@@ -417,15 +505,39 @@ export class X402GatewayEngine {
       return { ok: false, error: 'EIP-3009 payment authorization is not yet active (`validAfter > now`).' };
     }
 
-    const replayKey = `eip3009:${from.toLowerCase()}:${nonce.toLowerCase()}`;
+    const hintedAsset = parsed.accepted?.asset || parsed.asset || null;
+    const chainKind = isCelo ? 'celo' : 'base';
+    const replayKey = `eip3009:${chainKind}:${from.toLowerCase()}:${nonce.toLowerCase()}`;
     return {
       ok: true,
       version,
+      chainKind,
+      hintedAsset,
       paymentPayload: parsed,
       payer: from,
       valueAtomic: valueBig.toString(),
       replayKey,
     };
+  }
+
+  _candidateRequirements(check, endpoint, resourceUrl) {
+    if (check.chainKind === 'celo') {
+      const allReqs =
+        check.version === 2
+          ? buildCeloPaymentRequirementsV2(endpoint, this.payTo)
+          : buildCeloPaymentRequirementsV1(endpoint, resourceUrl, this.payTo);
+      if (typeof check.hintedAsset === 'string' && check.hintedAsset.trim() !== '') {
+        const wanted = check.hintedAsset.toLowerCase();
+        const exactMatch = allReqs.filter((r) => r.asset.toLowerCase() === wanted);
+        if (exactMatch.length > 0) return exactMatch;
+      }
+      return allReqs;
+    }
+    return [
+      check.version === 2
+        ? buildPaymentRequirementsV2(endpoint, this.payTo)
+        : buildPaymentRequirementsV1(endpoint, resourceUrl, this.payTo),
+    ];
   }
 
   async _verifyAndExecuteEip3009({ credential, endpoint, resourceUrl, executeCallback }) {
@@ -440,82 +552,100 @@ export class X402GatewayEngine {
     }
 
     try {
-      const paymentRequirements =
-        check.version === 2
-          ? buildPaymentRequirementsV2(endpoint, this.payTo)
-          : buildPaymentRequirementsV1(endpoint, resourceUrl, this.payTo);
-
-      const normalizedPaymentPayload =
-        check.version === 2
-          ? {
-              ...check.paymentPayload,
-              x402Version: 2,
-              resource: check.paymentPayload.resource || {
-                url: resourceUrl,
-                description: endpoint.description,
-                mimeType: 'application/json',
-              },
-              accepted: check.paymentPayload.accepted || paymentRequirements,
-            }
-          : check.paymentPayload;
-
-      const reqBody = {
-        x402Version: check.version,
-        paymentPayload: normalizedPaymentPayload,
-        paymentRequirements,
-      };
+      const candidateReqs = this._candidateRequirements(check, endpoint, resourceUrl);
+      const facList = check.chainKind === 'celo' ? this.celoFacilitatorUrls : this.facilitatorUrls;
+      const chainLabel = check.chainKind === 'celo' ? 'Celo Mainnet' : 'Base Mainnet';
 
       let verifiedFacilitator = null;
-      let lastFacilitatorErr = 'No facilitator reachable for Base Mainnet verification.';
+      let matchedRequirements = null;
+      let matchedReqBody = null;
+      let lastFacilitatorErr = `No facilitator reachable for ${chainLabel} verification.`;
 
-      for (const facUrl of this.facilitatorUrls) {
-        try {
-          const vRes = await this._postJson(`${facUrl}/verify`, reqBody);
-          if (vRes.json && vRes.json.isValid === true) {
-            verifiedFacilitator = facUrl;
-            break;
+      outer: for (const paymentRequirements of candidateReqs) {
+        const normalizedPaymentPayload =
+          check.version === 2
+            ? {
+                ...check.paymentPayload,
+                x402Version: 2,
+                resource: check.paymentPayload.resource || {
+                  url: resourceUrl,
+                  description: endpoint.description,
+                  mimeType: 'application/json',
+                },
+                accepted: check.paymentPayload.accepted || paymentRequirements,
+              }
+            : check.paymentPayload;
+
+        const reqBody = {
+          x402Version: check.version,
+          paymentPayload: normalizedPaymentPayload,
+          paymentRequirements,
+        };
+
+        for (const facUrl of facList) {
+          try {
+            const vRes = await this._postJson(`${facUrl}/verify`, reqBody);
+            if (vRes.json && vRes.json.isValid === true) {
+              verifiedFacilitator = facUrl;
+              matchedRequirements = paymentRequirements;
+              matchedReqBody = reqBody;
+              break outer;
+            }
+            const reason =
+              vRes.json?.invalidReason || vRes.json?.error || vRes.json?.message || `HTTP ${vRes.status}`;
+            const lowerReason = String(reason).toLowerCase();
+            const isUnsupportedOrTransient =
+              vRes.status >= 500 ||
+              lowerReason.includes('unsupported') ||
+              lowerReason.includes('network');
+            const isSigDomainMismatchOnMultiToken =
+              candidateReqs.length > 1 &&
+              (lowerReason.includes('signature') || lowerReason.includes('signer') || lowerReason.includes('domain'));
+            lastFacilitatorErr = `Payment verification failed: ${reason}`;
+            if (!isUnsupportedOrTransient && !isSigDomainMismatchOnMultiToken && vRes.json && vRes.json.isValid === false) {
+              return { ok: false, error: lastFacilitatorErr };
+            }
+            if (isSigDomainMismatchOnMultiToken) {
+              // Try next token candidate on Celo (e.g. USDT after USDC when v1 X-PAYMENT omits asset)
+              break;
+            }
+          } catch (err) {
+            lastFacilitatorErr = `Facilitator ${facUrl} unreachable: ${err.message}`;
           }
-          const reason =
-            vRes.json?.invalidReason || vRes.json?.error || vRes.json?.message || `HTTP ${vRes.status}`;
-          // If facilitator explicitly rejected signature/balance (and not unsupported network / 5xx), stop early
-          const lowerReason = String(reason).toLowerCase();
-          const isUnsupportedOrTransient =
-            vRes.status >= 500 ||
-            lowerReason.includes('unsupported') ||
-            lowerReason.includes('network');
-          lastFacilitatorErr = `Payment verification failed: ${reason}`;
-          if (!isUnsupportedOrTransient && vRes.json && vRes.json.isValid === false) {
-            return { ok: false, error: lastFacilitatorErr };
-          }
-        } catch (err) {
-          lastFacilitatorErr = `Facilitator ${facUrl} unreachable: ${err.message}`;
         }
       }
 
-      if (!verifiedFacilitator) {
+      if (!verifiedFacilitator || !matchedReqBody || !matchedRequirements) {
         return { ok: false, error: lastFacilitatorErr };
       }
 
       // Execute the deterministic tool BEFORE settling so internal failures never charge the buyer!
       const resultPayload = await executeCallback();
 
-      const sRes = await this._postJson(`${verifiedFacilitator}/settle`, reqBody, 20000);
+      const sRes = await this._postJson(`${verifiedFacilitator}/settle`, matchedReqBody, 20000);
       const settledOk = Boolean(sRes.json && (sRes.json.success === true || sRes.json.transaction || sRes.json.txHash));
       if (!settledOk) {
         const reason =
           sRes.json?.errorReason || sRes.json?.error || sRes.json?.message || `HTTP ${sRes.status}`;
-        return { ok: false, error: `On-chain USDC settlement failed: ${reason}` };
+        return { ok: false, error: `On-chain stablecoin settlement failed: ${reason}` };
       }
 
       const txHash = sRes.json.transaction || sRes.json.txHash || '';
+      const isCelo = check.chainKind === 'celo';
       const receiptObj = {
         success: true,
         transaction: txHash,
-        network: check.version === 2 ? BASE_CAIP2_NETWORK : BASE_V1_NETWORK,
-        chainId: BASE_CHAIN_ID,
+        network: isCelo
+          ? check.version === 2
+            ? CELO_CAIP2_NETWORK
+            : CELO_V1_NETWORK
+          : check.version === 2
+            ? BASE_CAIP2_NETWORK
+            : BASE_V1_NETWORK,
+        chainId: isCelo ? CELO_CHAIN_ID : BASE_CHAIN_ID,
         payer: sRes.json.payer || check.payer,
         payTo: this.payTo,
-        asset: BASE_USDC_ASSET,
+        asset: matchedRequirements.asset,
         amountAtomic: check.valueAtomic,
         settledVia: verifiedFacilitator,
       };
@@ -524,6 +654,8 @@ export class X402GatewayEngine {
         replayKey: check.replayKey,
         endpointId: endpoint.id,
         transaction: txHash,
+        network: receiptObj.network,
+        asset: matchedRequirements.asset,
         payer: receiptObj.payer,
         payTo: this.payTo,
         amountAtomic: check.valueAtomic,
@@ -554,14 +686,23 @@ export class X402GatewayEngine {
 
   async _verifyAndExecuteTxHash({ credential, endpoint, executeCallback }) {
     const txHash = credential.raw;
+    const isCelo = credential.chainKind === 'celo';
+    const chainLabel = isCelo ? 'Celo Mainnet' : 'Base Mainnet';
+    const expectedChainId = isCelo ? CELO_CHAIN_ID : BASE_CHAIN_ID;
+    const expectedNetwork = isCelo ? CELO_CAIP2_NETWORK : BASE_CAIP2_NETWORK;
+    const rpcUrls = isCelo ? this.celoRpcUrls : this.baseRpcUrls;
+    const acceptedAssets = isCelo
+      ? new Set(CELO_PAYMENT_ASSETS.map((t) => t.asset.toLowerCase()))
+      : new Set([BASE_USDC_ASSET.toLowerCase()]);
+
     if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) {
       return {
         ok: false,
-        error: 'Invalid `X-TX-HASH` header: expected 0x-prefixed 64-character Base Mainnet transaction hash.',
+        error: `Invalid \`${isCelo ? 'X-CELO-TX-HASH' : 'X-TX-HASH'}\` header: expected 0x-prefixed 64-character ${chainLabel} transaction hash.`,
       };
     }
 
-    const replayKey = `tx:${txHash.toLowerCase()}`;
+    const replayKey = `tx:${isCelo ? 'celo' : 'base'}:${txHash.toLowerCase()}`;
     const lock = this.ledger.acquireLock(replayKey);
     if (!lock.ok) {
       return { ok: false, error: lock.reason };
@@ -570,9 +711,9 @@ export class X402GatewayEngine {
     try {
       let receipt = null;
       let rpcUsed = null;
-      let lastRpcErr = 'Unable to reach Base Mainnet RPC.';
+      let lastRpcErr = `Unable to reach ${chainLabel} RPC.`;
 
-      for (const rpcUrl of this.baseRpcUrls) {
+      for (const rpcUrl of rpcUrls) {
         try {
           const rpcRes = await this._postJson(rpcUrl, {
             jsonrpc: '2.0',
@@ -594,12 +735,12 @@ export class X402GatewayEngine {
       }
 
       if (!rpcUsed) {
-        return { ok: false, error: `Base Mainnet RPC verification unavailable: ${lastRpcErr}` };
+        return { ok: false, error: `${chainLabel} RPC verification unavailable: ${lastRpcErr}` };
       }
       if (!receipt) {
         return {
           ok: false,
-          error: `Transaction ${txHash} not found or not yet confirmed on Base Mainnet (chainId 8453).`,
+          error: `Transaction ${txHash} not found or not yet confirmed on ${chainLabel} (chainId ${expectedChainId}).`,
         };
       }
       if (receipt.status !== '0x1') {
@@ -609,16 +750,18 @@ export class X402GatewayEngine {
       const expectedToTopic = `0x000000000000000000000000${this.payTo.slice(2).toLowerCase()}`;
       let totalPaid = 0n;
       let payer = receipt.from || '';
+      let matchedAsset = isCelo ? CELO_USDC_ASSET : BASE_USDC_ASSET;
 
       for (const log of receipt.logs || []) {
         if (!log || typeof log.address !== 'string') continue;
-        if (log.address.toLowerCase() !== BASE_USDC_ASSET.toLowerCase()) continue;
+        if (!acceptedAssets.has(log.address.toLowerCase())) continue;
         const topics = Array.isArray(log.topics) ? log.topics : [];
         if (topics.length < 3) continue;
         if (topics[0].toLowerCase() !== ERC20_TRANSFER_TOPIC0) continue;
         if (topics[2].toLowerCase() !== expectedToTopic) continue;
         if (typeof log.data === 'string' && /^0x[0-9a-fA-F]+$/.test(log.data)) {
           totalPaid += BigInt(log.data);
+          matchedAsset = log.address;
           if (topics[1] && topics[1].length === 66) {
             payer = `0x${topics[1].slice(26)}`;
           }
@@ -629,7 +772,7 @@ export class X402GatewayEngine {
       if (totalPaid < requiredBig) {
         return {
           ok: false,
-          error: `Transaction ${txHash} transferred ${totalPaid.toString()} atomic Base USDC to ${this.payTo}; required at least ${requiredBig.toString()} ($${endpoint.priceUsd} USDC).`,
+          error: `Transaction ${txHash} transferred ${totalPaid.toString()} atomic units to ${this.payTo} on ${chainLabel}; required at least ${requiredBig.toString()} ($${endpoint.priceUsd} USD).`,
         };
       }
 
@@ -638,19 +781,21 @@ export class X402GatewayEngine {
       const receiptObj = {
         success: true,
         transaction: txHash,
-        network: BASE_CAIP2_NETWORK,
-        chainId: BASE_CHAIN_ID,
+        network: expectedNetwork,
+        chainId: expectedChainId,
         payer,
         payTo: this.payTo,
-        asset: BASE_USDC_ASSET,
+        asset: matchedAsset,
         amountAtomic: totalPaid.toString(),
-        settledVia: 'base-mainnet-rpc',
+        settledVia: isCelo ? 'celo-mainnet-rpc' : 'base-mainnet-rpc',
       };
 
       this.ledger.recordSettlement({
         replayKey,
         endpointId: endpoint.id,
         transaction: txHash,
+        network: expectedNetwork,
+        asset: matchedAsset,
         payer,
         payTo: this.payTo,
         amountAtomic: totalPaid.toString(),

@@ -8,6 +8,8 @@ import { createGatewayServer } from '../src/server.mjs';
 import { scanEvmBytecodeCapabilities } from '../src/web3/token-rug-scanner.mjs';
 import {
   BASE_USDC_ASSET,
+  CELO_USDC_ASSET,
+  CELO_USDT_ASSET,
   ERC20_TRANSFER_TOPIC0,
   PAY_TO,
 } from '../src/x402.mjs';
@@ -199,9 +201,45 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
   const { server } = createGatewayServer({
     publicBaseUrl: 'https://x402-demo.trycloudflare.com',
     facilitatorUrls: ['https://mock-facilitator.test'],
+    celoFacilitatorUrls: ['https://mock-celo-facilitator.test'],
     baseRpcUrls: ['https://mock-base-rpc.test'],
+    celoRpcUrls: ['https://mock-celo-rpc.test'],
     ledgerPath,
-    fetchFn: mockFetch,
+    fetchFn: async (url, init) => {
+      if (url === 'https://mock-celo-facilitator.test/verify') {
+        const b = JSON.parse(init.body);
+        // Simulate v1 USDT signature failing USDC domain check first, then succeeding on USDT!
+        const sig = b.paymentPayload?.payload?.signature || '';
+        if (sig.startsWith('0xee') && b.paymentRequirements.asset.toLowerCase() !== CELO_USDT_ASSET.toLowerCase()) {
+          return new Response(
+            JSON.stringify({ isValid: false, invalidReason: 'invalid_exact_evm_payload_signature' }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        verifyCalls += 1;
+        return new Response(
+          JSON.stringify({
+            isValid: true,
+            payer: b.paymentPayload.payload.authorization.from,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (url === 'https://mock-celo-facilitator.test/settle') {
+        const b = JSON.parse(init.body);
+        settleCalls += 1;
+        return new Response(
+          JSON.stringify({
+            success: true,
+            transaction: `0x${String(900 + settleCalls).padStart(64, '0')}`,
+            network: b.x402Version === 2 ? 'eip155:42220' : 'celo',
+            payer: b.paymentPayload.payload.authorization.from,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return mockFetch(url, init);
+    },
     nowFn: () => 1800000000,
   });
 
@@ -254,7 +292,7 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
       assert.equal(res.status, 402);
       const body = await res.json();
       assert.equal(body.x402Version, 1);
-      assert.equal(body.accepts.length, 1);
+      assert.equal(body.accepts.length, 3);
       const req0 = body.accepts[0];
       assert.equal(req0.scheme, 'exact');
       assert.equal(req0.network, 'base');
@@ -266,14 +304,29 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
       assert.equal(req0.outputSchema.input.method, 'POST');
       assert.ok(req0.outputSchema.input.bodyFields.address.required);
 
+      assert.equal(body.accepts[1].network, 'celo');
+      assert.equal(body.accepts[1].asset, CELO_USDC_ASSET);
+      assert.equal(body.accepts[1].extra.name, 'USDC');
+      assert.equal(body.accepts[1].extra.version, '2');
+
+      assert.equal(body.accepts[2].network, 'celo');
+      assert.equal(body.accepts[2].asset, CELO_USDT_ASSET);
+      assert.equal(body.accepts[2].extra.name, 'Tether USD');
+      assert.equal(body.accepts[2].extra.version, '1');
+
       const v2Header = res.headers.get('payment-required');
       assert.ok(v2Header);
       const v2 = decodeB64(v2Header);
       assert.equal(v2.x402Version, 2);
+      assert.equal(v2.accepts.length, 3);
       assert.equal(v2.accepts[0].network, 'eip155:8453');
       assert.equal(v2.accepts[0].amount, '10000');
       assert.equal(v2.accepts[0].maxAmountRequired, undefined);
       assert.equal(v2.accepts[0].payTo, PAY_TO);
+      assert.equal(v2.accepts[1].network, 'eip155:42220');
+      assert.equal(v2.accepts[1].asset, CELO_USDC_ASSET);
+      assert.equal(v2.accepts[2].network, 'eip155:42220');
+      assert.equal(v2.accepts[2].asset, CELO_USDT_ASSET);
       assert.equal(v2.extensions.bazaar.info.output.example.status, 'ok');
       assert.equal(body.extensions.bazaar.info.output.example.tool, 'validate_multichain_address');
     }
@@ -576,5 +629,79 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     assert.equal(getPaidJson.summary.valid, true);
     assert.equal(getPaidJson.summary.canonicalAddress, PAY_TO);
     assert.equal(getPaidJson.payment.network, 'eip155:8453');
+  });
+
+  await t.test('9. Celo Mainnet USDC (v2) & USDT (v1 multi-token fallback) settlement + /terms support page', async () => {
+    const termsHtml = await fetch(`${localUrl}/terms`, { headers: { Accept: 'text/html' } });
+    assert.equal(termsHtml.status, 200);
+    assert.ok((await termsHtml.text()).includes('chenshulang0223@gmail.com'));
+
+    const termsJson = await fetch(`${localUrl}/terms`, { headers: { Accept: 'application/json' } });
+    assert.equal(termsJson.status, 200);
+    const termsObj = await termsJson.json();
+    assert.equal(termsObj.payTo, PAY_TO);
+    assert.ok(termsObj.supportedNetworks.includes('eip155:42220'));
+
+    // Celo USDC v2 (`PAYMENT-SIGNATURE`)
+    const celoV2 = encodeB64({
+      x402Version: 2,
+      network: 'eip155:42220',
+      accepted: {
+        scheme: 'exact',
+        network: 'eip155:42220',
+        amount: '10000',
+        asset: CELO_USDC_ASSET,
+        payTo: PAY_TO,
+        extra: { name: 'USDC', version: '2' },
+      },
+      payload: {
+        signature: `0x${'dd'.repeat(65)}`,
+        authorization: {
+          from: '0x3333333333333333333333333333333333333333',
+          to: PAY_TO,
+          value: '10000',
+          validAfter: '0',
+          validBefore: '1999999999',
+          nonce: `0x${'55'.repeat(32)}`,
+        },
+      },
+    });
+    const rCeloUsdc = await fetch(`${localUrl}/api/v1/validate-address`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'PAYMENT-SIGNATURE': celoV2 },
+      body: JSON.stringify({ address: PAY_TO, chain: 'evm' }),
+    });
+    assert.equal(rCeloUsdc.status, 200);
+    const jCeloUsdc = await rCeloUsdc.json();
+    assert.equal(jCeloUsdc.payment.network, 'eip155:42220');
+    assert.equal(jCeloUsdc.payment.chainId, 42220);
+    assert.equal(jCeloUsdc.payment.asset, CELO_USDC_ASSET);
+
+    // Celo USDT v1 (`X-PAYMENT`, omitting `asset` just like `@celo/buy` v1 does!)
+    const celoV1Usdt = encodeB64({
+      x402Version: 1,
+      scheme: 'exact',
+      network: 'celo',
+      payload: {
+        signature: `0x${'ee'.repeat(65)}`,
+        authorization: {
+          from: '0x4444444444444444444444444444444444444444',
+          to: PAY_TO,
+          value: '10000',
+          validAfter: '0',
+          validBefore: '1999999999',
+          nonce: `0x${'66'.repeat(32)}`,
+        },
+      },
+    });
+    const rCeloUsdt = await fetch(`${localUrl}/api/v1/validate-address?address=${PAY_TO}&chain=evm`, {
+      method: 'GET',
+      headers: { 'X-PAYMENT': celoV1Usdt },
+    });
+    assert.equal(rCeloUsdt.status, 200);
+    const jCeloUsdt = await rCeloUsdt.json();
+    assert.equal(jCeloUsdt.payment.network, 'celo');
+    assert.equal(jCeloUsdt.payment.chainId, 42220);
+    assert.equal(jCeloUsdt.payment.asset, CELO_USDT_ASSET);
   });
 });
