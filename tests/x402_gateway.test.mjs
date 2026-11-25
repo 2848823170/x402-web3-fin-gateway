@@ -7,11 +7,17 @@ import test from 'node:test';
 import { createGatewayServer } from '../src/server.mjs';
 import { scanEvmBytecodeCapabilities } from '../src/web3/token-rug-scanner.mjs';
 import {
+  ARBITRUM_USDC_ASSET,
+  AVALANCHE_USDC_ASSET,
   BASE_USDC_ASSET,
   CELO_USDC_ASSET,
   CELO_USDT_ASSET,
   ERC20_TRANSFER_TOPIC0,
+  OPTIMISM_USDC_ASSET,
   PAY_TO,
+  POLYGON_USDC_ASSET,
+  SOLANA_PAY_TO,
+  SOLANA_USDC_MINT,
 } from '../src/x402.mjs';
 
 function encodeB64(obj) {
@@ -74,22 +80,28 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     const body = JSON.parse(init.body);
     if (url === 'https://mock-facilitator.test/verify') {
       verifyCalls += 1;
+      const isSol = Boolean(body.paymentPayload?.payload?.transaction);
       return new Response(
         JSON.stringify({
           isValid: true,
-          payer: body.paymentPayload.payload.authorization.from,
+          payer: isSol
+            ? 'SolBuyer111111111111111111111111111111111111'
+            : body.paymentPayload.payload.authorization.from,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
     }
     if (url === 'https://mock-facilitator.test/settle') {
       settleCalls += 1;
+      const isSol = Boolean(body.paymentPayload?.payload?.transaction);
       return new Response(
         JSON.stringify({
           success: true,
-          transaction: `0x${String(settleCalls).padStart(64, '0')}`,
-          network: body.x402Version === 2 ? 'eip155:8453' : 'base',
-          payer: body.paymentPayload.payload.authorization.from,
+          transaction: isSol ? `${'5'.repeat(87)}${settleCalls}` : `0x${String(settleCalls).padStart(64, '0')}`,
+          network: body.paymentRequirements?.network || (body.x402Version === 2 ? 'eip155:8453' : 'base'),
+          payer: isSol
+            ? 'SolBuyer111111111111111111111111111111111111'
+            : body.paymentPayload.payload.authorization.from,
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       );
@@ -204,8 +216,37 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     celoFacilitatorUrls: ['https://mock-celo-facilitator.test'],
     baseRpcUrls: ['https://mock-base-rpc.test'],
     celoRpcUrls: ['https://mock-celo-rpc.test'],
+    solanaRpcUrls: ['https://mock-solana-rpc.test'],
     ledgerPath,
     fetchFn: async (url, init) => {
+      if (url === 'https://mock-solana-rpc.test') {
+        const b = JSON.parse(init.body);
+        if (b.method === 'getTransaction') {
+          const [sig] = b.params;
+          if (sig.startsWith('5Va1idSo1Sig')) {
+            return new Response(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: 1,
+                result: {
+                  meta: {
+                    err: null,
+                    preTokenBalances: [
+                      { accountIndex: 2, mint: SOLANA_USDC_MINT, owner: SOLANA_PAY_TO, uiTokenAmount: { amount: '50000' } },
+                    ],
+                    postTokenBalances: [
+                      { accountIndex: 2, mint: SOLANA_USDC_MINT, owner: SOLANA_PAY_TO, uiTokenAmount: { amount: '60000' } },
+                    ],
+                  },
+                  transaction: { message: { accountKeys: ['SolDirectPayer111111111111111111111111111111'] } },
+                },
+              }),
+              { status: 200, headers: { 'Content-Type': 'application/json' } },
+            );
+          }
+          return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: null }), { status: 200 });
+        }
+      }
       if (url === 'https://mock-celo-facilitator.test/verify') {
         const b = JSON.parse(init.body);
         // Simulate v1 USDT signature failing USDC domain check first, then succeeding on USDT!
@@ -292,7 +333,7 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
       assert.equal(res.status, 402);
       const body = await res.json();
       assert.equal(body.x402Version, 1);
-      assert.equal(body.accepts.length, 3);
+      assert.equal(body.accepts.length, 8);
       const req0 = body.accepts[0];
       assert.equal(req0.scheme, 'exact');
       assert.equal(req0.network, 'base');
@@ -314,11 +355,24 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
       assert.equal(body.accepts[2].extra.name, 'Tether USD');
       assert.equal(body.accepts[2].extra.version, '1');
 
+      assert.equal(body.accepts[3].network, 'arbitrum');
+      assert.equal(body.accepts[3].asset, ARBITRUM_USDC_ASSET);
+      assert.equal(body.accepts[4].network, 'polygon');
+      assert.equal(body.accepts[4].asset, POLYGON_USDC_ASSET);
+      assert.equal(body.accepts[5].network, 'optimism');
+      assert.equal(body.accepts[5].asset, OPTIMISM_USDC_ASSET);
+      assert.equal(body.accepts[6].network, 'avalanche');
+      assert.equal(body.accepts[6].asset, AVALANCHE_USDC_ASSET);
+      assert.equal(body.accepts[7].network, 'solana');
+      assert.equal(body.accepts[7].asset, SOLANA_USDC_MINT);
+      assert.equal(body.accepts[7].payTo, SOLANA_PAY_TO);
+      assert.ok(body.accepts[7].extra.feePayer);
+
       const v2Header = res.headers.get('payment-required');
       assert.ok(v2Header);
       const v2 = decodeB64(v2Header);
       assert.equal(v2.x402Version, 2);
-      assert.equal(v2.accepts.length, 3);
+      assert.equal(v2.accepts.length, 8);
       assert.equal(v2.accepts[0].network, 'eip155:8453');
       assert.equal(v2.accepts[0].amount, '10000');
       assert.equal(v2.accepts[0].maxAmountRequired, undefined);
@@ -327,6 +381,12 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
       assert.equal(v2.accepts[1].asset, CELO_USDC_ASSET);
       assert.equal(v2.accepts[2].network, 'eip155:42220');
       assert.equal(v2.accepts[2].asset, CELO_USDT_ASSET);
+      assert.equal(v2.accepts[3].network, 'eip155:42161');
+      assert.equal(v2.accepts[4].network, 'eip155:137');
+      assert.equal(v2.accepts[5].network, 'eip155:10');
+      assert.equal(v2.accepts[6].network, 'eip155:43114');
+      assert.equal(v2.accepts[7].network, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+      assert.equal(v2.accepts[7].payTo, SOLANA_PAY_TO);
       assert.equal(v2.extensions.bazaar.info.output.example.status, 'ok');
       assert.equal(body.extensions.bazaar.info.output.example.tool, 'validate_multichain_address');
     }
@@ -703,5 +763,117 @@ test('x402 Direct 0%-Fee Base Mainnet USDC Gateway — full discovery, security 
     assert.equal(jCeloUsdt.payment.network, 'celo');
     assert.equal(jCeloUsdt.payment.chainId, 42220);
     assert.equal(jCeloUsdt.payment.asset, CELO_USDT_ASSET);
+  });
+
+  await t.test('10. Multi-chain EVM (Arbitrum, Optimism) + Solana SVM x402 & X-SOLANA-TX-SIG settlement', async () => {
+    // Arbitrum One v2
+    const arbV2 = encodeB64({
+      x402Version: 2,
+      network: 'eip155:42161',
+      accepted: {
+        scheme: 'exact',
+        network: 'eip155:42161',
+        amount: '10000',
+        asset: ARBITRUM_USDC_ASSET,
+        payTo: PAY_TO,
+      },
+      payload: {
+        signature: `0x${'aa'.repeat(65)}`,
+        authorization: {
+          from: '0x5555555555555555555555555555555555555555',
+          to: PAY_TO,
+          value: '10000',
+          validAfter: '0',
+          validBefore: '1999999999',
+          nonce: `0x${'77'.repeat(32)}`,
+        },
+      },
+    });
+    const rArb = await fetch(`${localUrl}/api/v1/validate-address`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'PAYMENT-SIGNATURE': arbV2 },
+      body: JSON.stringify({ address: PAY_TO, chain: 'evm' }),
+    });
+    assert.equal(rArb.status, 200);
+    const jArb = await rArb.json();
+    assert.equal(jArb.payment.network, 'eip155:42161');
+    assert.equal(jArb.payment.chainId, 42161);
+    assert.equal(jArb.payment.asset, ARBITRUM_USDC_ASSET);
+    assert.equal(jArb.payment.payTo, PAY_TO);
+
+    // Optimism v1 (routed through ultravioletadao primary)
+    const opV1 = encodeB64({
+      x402Version: 1,
+      scheme: 'exact',
+      network: 'optimism',
+      payload: {
+        signature: `0x${'bb'.repeat(65)}`,
+        authorization: {
+          from: '0x6666666666666666666666666666666666666666',
+          to: PAY_TO,
+          value: '10000',
+          validAfter: '0',
+          validBefore: '1999999999',
+          nonce: `0x${'88'.repeat(32)}`,
+        },
+      },
+    });
+    const rOp = await fetch(`${localUrl}/api/v1/validate-address`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-PAYMENT': opV1 },
+      body: JSON.stringify({ address: PAY_TO, chain: 'evm' }),
+    });
+    assert.equal(rOp.status, 200);
+    const jOp = await rOp.json();
+    assert.equal(jOp.payment.network, 'optimism');
+    assert.equal(jOp.payment.chainId, 10);
+    assert.equal(jOp.payment.asset, OPTIMISM_USDC_ASSET);
+
+    // Solana Mainnet v2 SVM `exact` (`payload.transaction`) + anti-replay
+    const solV2 = encodeB64({
+      x402Version: 2,
+      network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+      accepted: {
+        scheme: 'exact',
+        network: 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp',
+        amount: '10000',
+        asset: SOLANA_USDC_MINT,
+        payTo: SOLANA_PAY_TO,
+      },
+      payload: {
+        transaction: 'AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAA==',
+      },
+    });
+    const rSol = await fetch(`${localUrl}/api/v1/validate-address`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'PAYMENT-SIGNATURE': solV2 },
+      body: JSON.stringify({ address: SOLANA_PAY_TO, chain: 'solana' }),
+    });
+    assert.equal(rSol.status, 200);
+    const jSol = await rSol.json();
+    assert.equal(jSol.payment.network, 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp');
+    assert.equal(jSol.payment.payTo, SOLANA_PAY_TO);
+    assert.equal(jSol.payment.asset, SOLANA_USDC_MINT);
+
+    // Replay same Solana transaction -> 402
+    const rSolReplay = await fetch(`${localUrl}/api/v1/validate-address`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'PAYMENT-SIGNATURE': solV2 },
+      body: JSON.stringify({ address: SOLANA_PAY_TO, chain: 'solana' }),
+    });
+    assert.equal(rSolReplay.status, 402);
+    assert.match((await rSolReplay.json()).error, /replay rejected/);
+
+    // Direct X-SOLANA-TX-SIG verification
+    const validSolSig = `5Va1idSo1Sig${'1'.repeat(76)}`;
+    const rSolDirect = await fetch(`${localUrl}/api/v1/validate-address`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-SOLANA-TX-SIG': validSolSig },
+      body: JSON.stringify({ address: SOLANA_PAY_TO, chain: 'solana' }),
+    });
+    assert.equal(rSolDirect.status, 200);
+    const jSolDirect = await rSolDirect.json();
+    assert.equal(jSolDirect.payment.settledVia, 'solana-mainnet-rpc');
+    assert.equal(jSolDirect.payment.payTo, SOLANA_PAY_TO);
   });
 });

@@ -19,6 +19,11 @@ import {
   PAID_ENDPOINTS,
 } from './catalog.mjs';
 import {
+  ADDITIONAL_EVM_USDC_CHAINS,
+  ARBITRUM_CAIP2_NETWORK,
+  ARBITRUM_USDC_ASSET,
+  AVALANCHE_CAIP2_NETWORK,
+  AVALANCHE_USDC_ASSET,
   BASE_CAIP2_NETWORK,
   BASE_CHAIN_ID,
   BASE_USDC_ASSET,
@@ -33,8 +38,16 @@ import {
   DEFAULT_CELO_FACILITATOR_URLS,
   DEFAULT_CELO_RPC_URLS,
   DEFAULT_FACILITATOR_URLS,
+  DEFAULT_SOLANA_RPC_URLS,
   extractPaymentCredential,
+  OPTIMISM_CAIP2_NETWORK,
+  OPTIMISM_USDC_ASSET,
   PAY_TO,
+  POLYGON_CAIP2_NETWORK,
+  POLYGON_USDC_ASSET,
+  SOLANA_CAIP2_NETWORK,
+  SOLANA_PAY_TO,
+  SOLANA_USDC_MINT,
   USDC_EIP712_EXTRA,
   X402GatewayEngine,
 } from './x402.mjs';
@@ -71,7 +84,7 @@ function setCommonHeaders(res) {
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader(
     'Access-Control-Allow-Headers',
-    'Content-Type, Accept, Authorization, X-PAYMENT, PAYMENT-SIGNATURE, X-TX-HASH, X-BASE-TX-HASH, X-CELO-TX-HASH, Mcp-Session-Id, MCP-Protocol-Version',
+    'Content-Type, Accept, Authorization, X-PAYMENT, PAYMENT-SIGNATURE, X-TX-HASH, X-BASE-TX-HASH, X-CELO-TX-HASH, X-ARBITRUM-TX-HASH, X-POLYGON-TX-HASH, X-OPTIMISM-TX-HASH, X-AVALANCHE-TX-HASH, X-SOLANA-TX-SIG, Mcp-Session-Id, MCP-Protocol-Version',
   );
   res.setHeader(
     'Access-Control-Expose-Headers',
@@ -215,7 +228,7 @@ function buildCatalogPayload(baseUrl, engine) {
   };
 }
 
-function buildOpenApiSpec(baseUrl, payTo) {
+function buildOpenApiSpec(baseUrl, payTo, solanaPayTo = SOLANA_PAY_TO) {
   const paths = {
     '/health': {
       get: {
@@ -246,18 +259,19 @@ function buildOpenApiSpec(baseUrl, payTo) {
   for (const e of PAID_ENDPOINTS) {
     paths[e.restPath] = {
       post: {
-        summary: `${e.title} ($${e.priceUsd} Base USDC via x402)`,
-        description: `${e.description}\n\n**x402 Payment**: \`${e.priceUsd} USDC\` (\`${e.amountAtomic}\` atomic units) on Base Mainnet (\`chainId: 8453\`, asset \`${BASE_USDC_ASSET}\`) settled directly to \`${payTo}\` (0% middleman fee).`,
+        summary: `${e.title} ($${e.priceUsd} USDC via x402 across Base, Celo, Arbitrum, Polygon, Optimism, Avalanche & Solana)`,
+        description: `${e.description}\n\n**x402 Payment**: \`${e.priceUsd} USDC\` (\`${e.amountAtomic}\` atomic units) settled directly with 0% middleman fee to \`${payTo}\` on EVM (\`Base\`, \`Celo USDC/USDT\`, \`Arbitrum\`, \`Polygon\`, \`Optimism\`, \`Avalanche\`) or \`${solanaPayTo}\` on \`Solana Mainnet\` (\`SPL USDC\`).`,
         operationId: e.mcpName,
         'x-payment-info': {
           protocols: [
-            {
-              x402: {
-                network: BASE_CAIP2_NETWORK,
-                asset: BASE_USDC_ASSET,
-                payTo,
-              },
-            },
+            { x402: { network: BASE_CAIP2_NETWORK, asset: BASE_USDC_ASSET, payTo } },
+            { x402: { network: CELO_CAIP2_NETWORK, asset: CELO_USDC_ASSET, payTo } },
+            { x402: { network: CELO_CAIP2_NETWORK, asset: CELO_USDT_ASSET, payTo } },
+            { x402: { network: ARBITRUM_CAIP2_NETWORK, asset: ARBITRUM_USDC_ASSET, payTo } },
+            { x402: { network: POLYGON_CAIP2_NETWORK, asset: POLYGON_USDC_ASSET, payTo } },
+            { x402: { network: OPTIMISM_CAIP2_NETWORK, asset: OPTIMISM_USDC_ASSET, payTo } },
+            { x402: { network: AVALANCHE_CAIP2_NETWORK, asset: AVALANCHE_USDC_ASSET, payTo } },
+            { x402: { network: SOLANA_CAIP2_NETWORK, asset: SOLANA_USDC_MINT, payTo: solanaPayTo } },
           ],
           price: {
             mode: 'fixed',
@@ -469,11 +483,13 @@ function buildTermsHtml(baseUrl, payTo) {
 
 export function createGatewayServer({
   payTo = PAY_TO,
+  solanaPayTo = SOLANA_PAY_TO,
   publicBaseUrl = process.env.PUBLIC_BASE_URL || '',
   facilitatorUrls = parseCsvEnv(process.env.X402_FACILITATOR_URLS, DEFAULT_FACILITATOR_URLS),
   celoFacilitatorUrls = parseCsvEnv(process.env.CELO_FACILITATOR_URLS, DEFAULT_CELO_FACILITATOR_URLS),
   baseRpcUrls = parseCsvEnv(process.env.BASE_RPC_URLS, DEFAULT_BASE_RPC_URLS),
   celoRpcUrls = parseCsvEnv(process.env.CELO_RPC_URLS, DEFAULT_CELO_RPC_URLS),
+  solanaRpcUrls = parseCsvEnv(process.env.SOLANA_RPC_URLS, DEFAULT_SOLANA_RPC_URLS),
   ledgerPath = process.env.LEDGER_PATH || resolve(__dirname, '..', 'data', 'settled_ledger.jsonl'),
   fetchFn = globalThis.fetch,
   nowFn = () => Math.floor(Date.now() / 1000),
@@ -481,10 +497,12 @@ export function createGatewayServer({
   const startedAtMs = Date.now();
   const engine = new X402GatewayEngine({
     payTo,
+    solanaPayTo,
     facilitatorUrls,
     celoFacilitatorUrls,
     baseRpcUrls,
     celoRpcUrls,
+    solanaRpcUrls,
     ledgerPath,
     fetchFn,
     nowFn,
@@ -564,13 +582,27 @@ export function createGatewayServer({
             repository: 'https://github.com/2848823170/x402-web3-fin-gateway',
             supportUrl: 'https://github.com/2848823170/x402-web3-fin-gateway/issues',
             payTo: engine.payTo,
-            supportedNetworks: [BASE_CAIP2_NETWORK, CELO_CAIP2_NETWORK],
+            solanaPayTo: engine.solanaPayTo,
+            supportedNetworks: [
+              BASE_CAIP2_NETWORK,
+              CELO_CAIP2_NETWORK,
+              ARBITRUM_CAIP2_NETWORK,
+              POLYGON_CAIP2_NETWORK,
+              OPTIMISM_CAIP2_NETWORK,
+              AVALANCHE_CAIP2_NETWORK,
+              SOLANA_CAIP2_NETWORK,
+            ],
             supportedAssets: {
               base: [BASE_USDC_ASSET],
               celo: [CELO_USDC_ASSET, CELO_USDT_ASSET],
+              arbitrum: [ARBITRUM_USDC_ASSET],
+              polygon: [POLYGON_USDC_ASSET],
+              optimism: [OPTIMISM_USDC_ASSET],
+              avalanche: [AVALANCHE_USDC_ASSET],
+              solana: [SOLANA_USDC_MINT],
             },
             refundPolicy:
-              'Invalid inputs return HTTP 400 prior to settlement ($0 charged). If a settled transaction fails to return its HTTP 200 payload, email chenshulang0223@gmail.com or open a GitHub issue with the txHash for a full on-chain refund to the payer wallet within 48 hours.',
+              'Invalid inputs return HTTP 400 prior to settlement ($0 charged). If a settled transaction fails to return its HTTP 200 payload, email chenshulang0223@gmail.com or open a GitHub issue with the txHash/signature for a full on-chain refund to the payer wallet within 48 hours.',
             dataProvenance:
               'Own open-source deterministic static/cryptographic analysis engine plus public permissionless JSON-RPC state on Base (8453), Celo (42220), and Solana Mainnet.',
           });
@@ -619,7 +651,7 @@ export function createGatewayServer({
       }
 
       if (method === 'GET' && pathname === '/openapi.json') {
-        sendJson(res, 200, buildOpenApiSpec(baseUrl, engine.payTo));
+        sendJson(res, 200, buildOpenApiSpec(baseUrl, engine.payTo, engine.solanaPayTo));
         return;
       }
 
