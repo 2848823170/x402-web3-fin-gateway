@@ -892,12 +892,12 @@ export const PAID_ENDPOINTS = [
     id: 'scan-token-risk',
     restPath: '/api/v1/scan-token-risk',
     mcpName: 'scan_token_rug_risk',
-    title: 'Live On-Chain Base & Solana Token Honeypot, Rug-Pull & Liquidity Scanner',
+    title: 'Live On-Chain Base, Celo & Solana Token Technical Risk Scanner',
     category: 'web3-security',
     priceUsd: '0.01',
     amountAtomic: '10000',
     description:
-      'Real-time on-chain token security oracle for autonomous trading agents (`ElizaOS`, `Coinbase AgentKit`, `Virtuals`, `GOAT`, `@celo/buy`). Queries Base Mainnet (`8453`), Celo Mainnet (`42220`), and Solana Mainnet RPCs in <400ms to detect EIP-1967 upgradeable proxies, unrenounced `owner()`, `SELFDESTRUCT`/`DELEGATECALL`/blacklist/fee-setter bytecode selectors, Uniswap V2/V3, Ubeswap & Aerodrome reserve depth + LP burn %, live `eth_call` `transfer()` honeypot simulation, Solana `mintAuthority`/`freezeAuthority`, Token-2022 `permanentDelegate`/`transferFeeConfig`/`transferHook` traps, and Top-1/Top-5/Top-10 holder whale concentration.',
+      'Automated technical token risk signals for software and agent workflows (not investment or financial advice). Queries public permissionless JSON-RPC state on Base Mainnet (`8453`), Celo Mainnet (`42220`), and Solana Mainnet directly to inspect EIP-1967 upgradeable proxies, unrenounced `owner()`, `SELFDESTRUCT`/`DELEGATECALL`/blacklist/fee-setter bytecode selectors, on-chain Uniswap V2/V3, Ubeswap & Aerodrome pool contract reserves + LP burn %, live `eth_call` `transfer()` simulation, Solana `mintAuthority`/`freezeAuthority`, Token-2022 `permanentDelegate`/`transferFeeConfig`/`transferHook` extensions, and Top-1/Top-5/Top-10 holder concentration.',
     inputSchema: {
       type: 'object',
       properties: {

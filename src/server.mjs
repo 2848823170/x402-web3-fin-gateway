@@ -415,7 +415,7 @@ function buildLandingHtml(baseUrl, payTo) {
   <div class="wrap">
     <span class="badge">HTTP 402 Payment Required &bull; Base Mainnet USDC (8453) &bull; 0% Middleman Fee</span>
     <h1>x402 Web3 Security &amp; Financial Audit Gateway</h1>
-    <p style="color:#94a3b8">Deterministic, zero-custody REST &amp; MCP tools for autonomous AI agents, trading bots, and finance pipelines. Every call settles directly on Base Mainnet USDC (<code>${BASE_USDC_ASSET}</code>) to <code>${payTo}</code>.</p>
+    <p style="color:#94a3b8">Deterministic, zero-custody REST &amp; MCP tools providing automated technical risk signals and data utilities for software and agent workflows (not investment, financial, or legal advice). Every call settles directly on Base Mainnet USDC (<code>${BASE_USDC_ASSET}</code>) or Celo Mainnet USDC/USDT to <code>${payTo}</code>.</p>
     <div class="card">
       <strong>Discovery Endpoints (Free HTTP 200)</strong><br/>
       &bull; x402 Manifest: <a href="${baseUrl}/.well-known/x402.json">${baseUrl}/.well-known/x402.json</a><br/>

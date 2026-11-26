@@ -1,9 +1,10 @@
 /**
- * Live On-Chain Base (ERC-20) & Solana (SPL / Token-2022) Honeypot, Rug-Pull & Liquidity Risk Oracle
+ * Live On-Chain Base & Celo (ERC-20) and Solana (SPL / Token-2022) Technical Token Risk Scanner
  * (`token-rug-scanner.mjs`).
  *
- * Pure Node.js >= 20 (zero external npm dependencies). Designed for <400ms execution
- * by autonomous trading agents (`ElizaOS`, `Coinbase AgentKit`, `Virtuals`, `GOAT`).
+ * Pure Node.js >= 20 (zero external npm dependencies, zero third-party price/liquidity APIs).
+ * Queries permissionless public JSON-RPC endpoints directly to produce automated technical
+ * bytecode, authority, and pool-reserve signals for software and agent workflows (not investment advice).
  */
 
 import { toEip55Address } from './crypto-primitives.mjs';
